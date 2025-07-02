@@ -119,3 +119,6 @@ optPenalties <- PenOpt(Tree = Treefit, X = X, Y = Y, Z = Z,
                        folds = folds, multistart = FALSE)
 optPenalties
 }
+\references{
+\CRANpkg{porridge}
+}

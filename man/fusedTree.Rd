@@ -138,6 +138,8 @@ fit$Effects
 fit1$Effects
 }
 \references{
+\CRANpkg{porridge}
+
 van Houwelingen, H. C., et al.. (2005). Cross-validated Cox regression on microarray gene expression data.
 \emph{Stad Med}
 

@@ -336,6 +336,9 @@ CVfoldsTree <- function(Y, Tree, Z, model = NULL, kfold = 5, nrepeat = 3) {
 #'   }
 #'   If \code{alphaInit = 0}, only the tuned \code{lambda} is returned.
 #'
+#' @references
+#' \CRANpkg{porridge}
+#'
 #' @details
 #' The cross-validated likelihood is optimized using the \code{Nelder-Mead}
 #' method from \code{stats::optim()}. When tuning both \code{lambda} and
@@ -612,6 +615,8 @@ PenOpt <- function(Tree, X, Y, Z, model = NULL,
 #' additional details on penalized regression for survival outcomes.
 #'
 #' @references
+#' \CRANpkg{porridge}
+#'
 #' van Houwelingen, H. C., et al.. (2005). Cross-validated Cox regression on microarray gene expression data.
 #' *Stad Med*
 #'
@@ -839,12 +844,30 @@ fusedTree <- function(Tree, X, Y, Z, LinVars = TRUE, model,
 #' @seealso \code{\link{fusedTree}} for model fitting.
 #'
 #' @examples
-#' \dontrun{
-#' fit <- fusedTree(Tree, X_train, Y_train, Z_train, model = "logistic", lambda = 10, alpha = 1000)
-#' preds <- predict(fit, newX = X_test, newZ = Z_test, newY = Y_test)
-#' head(preds)
+#' p = 5 # number of omics variables (low for illustration)
+#' p_Clin = 5 # number of clinical variables
+#' N = 100 # sample size
+#' # simulate from Friedman-like function
+#' g <- function(z) {
+#'   15 * sin(pi * z[,1] * z[,2]) + 10 * (z[,3] - 0.5)^2 + 2 * exp(z[,4]) + 2 * z[,5]
 #' }
-#'
+#' set.seed(11)
+#' Z <- as.data.frame(matrix(runif(N * p_Clin), nrow = N))
+#' X <- matrix(rnorm(N * p), nrow = N)            # omics data
+#' betas <- c(1,-1,3,4,2)                         # omics effects
+#' Y <- g(Z) + X %*% betas + rnorm(N)             # continuous outcome
+#' Y <- as.vector(Y)
+#' dat = cbind.data.frame(Y, Z) #set-up data correctly for rpart
+#' rp <- rpart::rpart(Y ~ ., data = dat,
+#'                    control = rpart::rpart.control(xval = 5, minbucket = 10),
+#'                    model = TRUE)
+#' cp = rp$cptable[,1][which.min(rp$cptable[,4])] # best model according to pruning
+#' Treefit <- rpart::prune(rp, cp = cp)
+#' fit <- fusedTree(Tree = Treefit, X = X, Y = Y, Z = Z,
+#'                     LinVars = FALSE, model = "linear",
+#'                     lambda = 10,
+#'                     alpha = 1000)
+#' Preds <- predict(fit, newX = X, newZ = Z, newY = Y)
 
 
 predict.fusedTree <- function(object, newX, newZ, newY, ...) {
