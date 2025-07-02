@@ -54,7 +54,7 @@ For binary and survival outcomes, only \code{"loglik"} (cross-validated
 likelihood) is supported. For continuous outcomes, an alternative is
 \code{"sos"} (sum of squares loss). Defaults to \code{"loglik"}.}
 
-\item{multistart}{Logical. Whether to use multiple initializations when
+\item{multistart}{Logical. Whether to initialize with different starting values when
 optimizing the cross-validated likelihood. Can help with stability when both
 \code{lambda} and \code{alpha} are tuned, at the cost of longer runtime.
 Defaults to \code{FALSE}.}
