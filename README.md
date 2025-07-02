@@ -32,7 +32,7 @@ For full methodological details, see the
 install.packages("fusedTree")
 
 # Development version from GitHub
-remotes::install_github("your_username/fusedTree")
+remotes::install_github("JeroenGoedhart/fusedTree")
 ```
 
 ------------------------------------------------------------------------
