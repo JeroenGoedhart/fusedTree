@@ -4,9 +4,9 @@ Version: 1.0.0
 Authors@R: 
     c(person(c("Jeroen", "M."), "Goedhart", , "jeroengoed@gmail.com", role = c("aut", "cre", "cph"),
       comment = c(ORCID = "0000-0003-0134-1897")),
-      person("Thomas", "Klausch", role = "aut"),
-      person(c("Mark","A."), "van de Wiel", role = "aut"),
-      person(c("Wessel", "N."), "van Wieringen", role = c("aut","ctb"), comment = "Author of 'porridge' 'R' package, from which many functionalities have been adopted"),
+      person(c("Wessel", "N."), "van Wieringen", role = "aut", comment = "Author of 'porridge' 'R' package, from which many functionalities have been adopted"),
+      person("Thomas", "Klausch", role = "ths"),
+      person(c("Mark","A."), "van de Wiel", role = "ths"),
       person("Hanarth Fonds", role = "fnd"))
 Description: Fit (generalized) linear regression models in each leaf node of a tree. 
     The tree is constructed using clinical variables only. The linear regression 
