@@ -106,7 +106,7 @@ Dat_Tree <- function(Tree, X, Z, LinVars = TRUE) {
 
   NumNodes <- length(unique(Tree$where))
   if (NumNodes < 2){
-    print("Tree has single node, return design matrices")
+    message("Tree has single node, return design matrices")
     return(list(Clinical = stats::model.matrix(~., Z), Omics = X))
   } else {
 
@@ -781,7 +781,6 @@ fusedTree <- function(Tree, X, Y, Z, LinVars = TRUE, model,
     if (alpha > 0){
       Delta = .PenMatr(NumNodes = NumNod, p = ncol(X))
     }
-    #View(Delta)
 
     Fit = .ridgeGLM2(Y = Y, U = U1, X = X1,
                      lambda = lambda, lambdaG = alpha, Dg = Delta,
@@ -1616,11 +1615,9 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
       # assess convergence
       if (is.infinite(loglik) | is.na(loglik) | is.nan(loglik)){
-        #print("Singluar Fit")
         lpNew=rep(0,nrow(Y[folds[[k]]]))
         break
       } else if (abs((loglik - loglikPrev)/loglikPrev) < minSuccDiff){
-        #print("Succesful Fit")
         break
       } else {
         loglikPrev <- loglik
@@ -1752,18 +1749,15 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
       # assess convergence
       if (is.infinite(loglik) | is.na(loglik) | is.nan(loglik)){
-        #print("Singluar Fit")
         lpNew=rep(0,nrow(Y[folds[[k]],]))
         break
       } else if (abs((loglik - loglikPrev)/loglikPrev) < minSuccDiff){
-        #print("Succesful Fit")
         break
       } else {
         loglikPrev <- loglik
         lpPrev<-lpAll
       }
-      if(iter == maxIter){
-        print("Not converged yet, please increase maxIter")}
+
     }
 
     RespTot <- base::append(RespTot,Y[folds[[k]],])
@@ -1996,11 +1990,9 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
       # assess convergence
       if (is.infinite(loglik) | is.na(loglik) | is.nan(loglik)){
-        #print("Singluar Fit")
         lpNew=rep(0,nrow(Y[folds[[k]]]))
         break
       } else if (abs((loglik - loglikPrev)/loglikPrev) < minSuccDiff){
-        #print("Succesful Fit")
         break
       } else {
         loglikPrev <- loglik
@@ -2152,19 +2144,13 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
       # assess convergence
       if (is.infinite(loglik) | is.na(loglik) | is.nan(loglik)){
-        #print("Singluar Fit")
         lpNew=rep(0,nrow(Y[folds[[k]],]))
         break
       } else if (abs((loglik - loglikPrev)/loglikPrev) < minSuccDiff){
-        #print("Succesful Fit")
         break
       } else {
         loglikPrev <- loglik
         lpPrev <- lpAll
-      }
-      if(iter==maxIter){
-        #print("Not converged yet, please increase maxIter")
-        lpNew=rep(0,nrow(Y[folds[[k]],]))
       }
     }
 
@@ -2396,7 +2382,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         lpPrev <-lp
       }
       if(iter == maxIter) {
-        message("Not converged yet, please increase maxIter")}
+        stop("Not converged yet, please increase maxIter")}
     }
     if (ncol(X) >= nrow(X)){
       bHat <-crossprod(X, slh) / lambda
@@ -2509,14 +2495,13 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         if (verbose) {
           cat("IRLS converged at iteration ",iter, "\n")
         }
-
         break
       } else {
         loglikPrev <- loglik
         lpPrev <- lp
       }
-      if(iter==maxIter) {
-        message("Not converged yet, please increase maxIter")}
+      if(iter == maxIter) {
+        stop("Not converged yet, please increase maxIter")}
     }
     if (ncol(X) >= nrow(X)){
       bHat <- as.numeric(tcrossprod(as.numeric(slh), Dg))
@@ -2546,7 +2531,6 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     lpPrev <- rep(0, length(Y))
     lp <- rep(0, length(Y))
     loglikPrev <- .loglikSurv(Y, lp) #penalty is zero for initial betas
-    print(loglikPrev)
     Yev = Y[,2] # event part of response
 
     for (iter in 1:maxIter){
@@ -2636,9 +2620,8 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         loglikPrev <- loglik
         lpPrev <- lp
       }
-
       if(iter == maxIter) {
-        message("Not converged yet, please increase maxIter")}
+        stop("Not converged yet, please increase maxIter")}
     }
 
     if (ncol(X) >= nrow(X)){
@@ -2757,7 +2740,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         lpPrev <- lp
       }
       if(iter == maxIter){
-        message("Not converged yet, please increase maxIter")}
+        stop("Not converged yet, please increase maxIter")}
     }
 
     if (ncol(X) >= nrow(X)){
@@ -2878,8 +2861,6 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
   di <- Y[,2]
   ht <- hazards[,1]
   Ht <- hazards[,2]
-  #print(ht)
-  #print(Ht)
   thescore <- sum(-Ht*exp(lp))
   di1 <- which(di==1)
   if(length(di1)>0) thescore <- thescore + sum(di[di1]*(log(ht[di1])+lp[di1]))
