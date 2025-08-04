@@ -14,6 +14,7 @@ PenOpt(
   alphaInit = 10,
   folds = CVfoldsTree(Y = Y, Tree = Tree, Z = Z, model = model),
   loss = "loglik",
+  symFusion = TRUE,
   multistart = FALSE,
   maxIter = 30,
   LinVars = FALSE
@@ -54,9 +55,16 @@ For binary and survival outcomes, only \code{"loglik"} (cross-validated
 likelihood) is supported. For continuous outcomes, an alternative is
 \code{"sos"} (sum of squares loss). Defaults to \code{"loglik"}.}
 
+\item{symFusion}{Logical. Whether fusion should be symmetric across nodes.
+Setting this parameter to \code{FALSE} induces asymmetric fusion. That is,
+nodes having more similar predictions (using only clinical variables)
+of the response will be shrunk more to each other than nodes having more
+distinct predictions. Setting to \code{FALSE} is not tested very well so
+use on your own risk. Defaults to \code{TRUE}.}
+
 \item{multistart}{Logical. Whether to initialize with different starting values when
 optimizing the cross-validated likelihood. Can help with stability when both
-\code{lambda} and \code{alpha} are tuned, at the cost of longer runtime.
+\code{lambda} and \code{alpha} are tuned, at the cost of longer run time.
 Defaults to \code{FALSE}.}
 
 \item{maxIter}{Integer. Maximum number of iterations for the IRLS (iterative

@@ -33,7 +33,8 @@
 #'   \item{Omics}{A matrix of omics data per leaf node. This matrix has
 #'     dimensions: sample size × (number of leaf nodes × number of omics variables).
 #'     For each observation, only the block of omics variables corresponding to its
-#'     tree node is populated (other blocks are set to zero).}#'
+#'     tree node is populated (other blocks are set to zero). If the matrix is high-dimensional,
+#'     a sparse matrix is returned of class "dgCMatrix" for memory efficiency.}
 #' }
 #'
 #' @export
@@ -68,9 +69,10 @@ Dat_Tree <- function(Tree, X, Z, LinVars = TRUE) {
 
   ## control statements ##
   if (!inherits(Tree, "rpart")) {
-    stop("Tree is not a rpart object")}
+    stop("Tree is not an rpart object")}
 
-
+  if (is.null(X) | is.null(Z)) {
+    stop("Either X, or Z is unspecified")}
 
   if (ncol(X) == 0 || nrow(X) == 0) {
     stop("Omics covariates not specified")}
@@ -116,9 +118,11 @@ Dat_Tree <- function(Tree, X, Z, LinVars = TRUE) {
     X_tot <- Matrix::t(Matrix::KhatriRao(t(X), t(ClinIntercepts)))
     colnames(X_tot) <- c(sapply(namesX, function (x) base::paste0(x,base::paste0("_" ,Nodenames))))
     colnames(ClinIntercepts) = Nodenames
+    if (ncol(X) < nrow(X)) {
+      X_tot <- as.matrix(X_tot)
+    }
 
-
-    if (LinVars == TRUE){
+    if (isTRUE(LinVars)){
       idVars <- which(sapply(Z, is.numeric) & apply(Z, 2, function (x) length(unique(x)) > 2))
       nameZ = colnames(Z)[idVars]
       Clinical <- as.matrix(cbind(ClinIntercepts, Z[,idVars]))
@@ -126,7 +130,7 @@ Dat_Tree <- function(Tree, X, Z, LinVars = TRUE) {
     } else {
       Clinical <- ClinIntercepts
     }
-    return(list(Clinical = Clinical, Omics = as.matrix(X_tot)))
+    return(list(Clinical = Clinical, Omics = X_tot))
   }
 }
 
@@ -143,7 +147,7 @@ Dat_Tree <- function(Tree, X, Z, LinVars = TRUE) {
 #' the leaf nodes of the fitted tree to ensure consistency in node composition
 #' between folds.
 #'
-#' @param Y The response variable. Should be:
+#' @param Y The response variable. Should be one of:
 #'   \itemize{
 #'     \item Numeric (for linear regression),
 #'     \item Binary (encoded as 0 and 1, for logistic regression),
@@ -206,7 +210,7 @@ CVfoldsTree <- function(Y, Tree, Z, model = NULL, kfold = 5, nrepeat = 3) {
   #Output: list object with kfold elements containing the sample indices of the left-out samples per fold
 
   if (!inherits(Tree, "rpart")) {
-    stop("Tree is not rpart object")
+    stop("Tree is not an rpart object")
   }
 
   if (!(model %in% c("linear", "logistic", "cox"))) {
@@ -216,6 +220,9 @@ CVfoldsTree <- function(Y, Tree, Z, model = NULL, kfold = 5, nrepeat = 3) {
   if (ncol(Z) == 0 || nrow(Z) == 0) {
     stop("Clinical covariates not specified")
   }
+
+  if (is.null(Y) | is.null(Z)) {
+    stop("Either Y or Z is unspecified")}
 
   if (length(Y) == 0) {
     stop("Y vector is empty")
@@ -278,11 +285,10 @@ CVfoldsTree <- function(Y, Tree, Z, model = NULL, kfold = 5, nrepeat = 3) {
   if (model == "cox"){
     StratDat <- cbind.data.frame(Resp = factor(Y[,2]),Node = Nodes)
     Strat <- splitTools::multi_strata(StratDat, strategy = "interaction")
-    folds = splitTools::create_folds(Strat, k = kfold, invert = TRUE, m_rep = nrepeat)
+    folds <- splitTools::create_folds(Strat, k = kfold, invert = TRUE, m_rep = nrepeat)
   }
   return(folds)
 }
-
 
 #' Tuning of the penalty parameters of fusedTree using cross-validation
 #'
@@ -318,9 +324,15 @@ CVfoldsTree <- function(Y, Tree, Z, model = NULL, kfold = 5, nrepeat = 3) {
 #'   For binary and survival outcomes, only \code{"loglik"} (cross-validated
 #'   likelihood) is supported. For continuous outcomes, an alternative is
 #'   \code{"sos"} (sum of squares loss). Defaults to \code{"loglik"}.
+#' @param symFusion Logical. Whether fusion should be symmetric across nodes.
+#' Setting this parameter to \code{FALSE} induces asymmetric fusion. That is,
+#' nodes having more similar predictions (using only clinical variables)
+#' of the response will be shrunk more to each other than nodes having more
+#' distinct predictions. Setting to \code{FALSE} is not tested very well so
+#' use on your own risk. Defaults to \code{TRUE}.
 #' @param multistart Logical. Whether to initialize with different starting values when
 #'   optimizing the cross-validated likelihood. Can help with stability when both
-#'   \code{lambda} and \code{alpha} are tuned, at the cost of longer runtime.
+#'   \code{lambda} and \code{alpha} are tuned, at the cost of longer run time.
 #'   Defaults to \code{FALSE}.
 #' @param maxIter Integer. Maximum number of iterations for the IRLS (iterative
 #'   reweighted least squares) algorithm. Used only for logistic and Cox models.
@@ -382,13 +394,14 @@ PenOpt <- function(Tree, X, Y, Z, model = NULL,
                    lambdaInit = 10, alphaInit = 10,
                    folds = CVfoldsTree(Y = Y, Tree = Tree, Z = Z, model = model),
                    loss = "loglik",
+                   symFusion = TRUE,
                    multistart = FALSE,
                    maxIter = 30,
                    LinVars = FALSE) {
 
   ## control statements ##
   if (!inherits(Tree, "rpart")) {
-    stop("Tree is not a rpart object")
+    stop("Tree is not an rpart object")
   }
 
   if (!(model %in% c("linear", "logistic", "cox"))) {
@@ -411,6 +424,9 @@ PenOpt <- function(Tree, X, Y, Z, model = NULL,
     stop("Y vector is empty")
   }
 
+  if (is.null(Y) | is.null(X) | is.null(Z)) {
+    stop("Either Y, X, or Z is unspecified")}
+
   if (!(is.numeric(Y) || inherits(Y, "Surv"))) {
     stop("Y is not a numeric or Surv object. If Y is binary please specify it as numeric vector coded with 0 and 1")
   }
@@ -428,6 +444,10 @@ PenOpt <- function(Tree, X, Y, Z, model = NULL,
 
   if (!is.logical(LinVars)) {
     stop("LinVars is not logical, specify as either TRUE or FALSE")
+  }
+
+  if (!is.logical(symFusion)) {
+    stop("symFusion is not logical, specify as either TRUE or FALSE")
   }
 
   if (!is.logical(multistart)) {
@@ -522,21 +542,23 @@ PenOpt <- function(Tree, X, Y, Z, model = NULL,
     NumNod = ncol(X1) / ncol(X)
 
     if (alphaInit == 0){
-      Delta <- matrix(0, ncol=ncol(X1), nrow=ncol(X1))
+      Delta <- NULL
     }
     if (alphaInit > 0){
-      Delta = .PenMatr(NumNodes = NumNod, p = ncol(X))
-    }
-    #View(Delta)
-
-
-    if (ncol(Delta) != ncol(X1)){
-      stop("number of columns of penalty matrix does not equal number of
+      Delta = .PenMatr(NumNodes = NumNod, p = ncol(X),
+                       symmetric = symFusion, Tree = Tree)
+      if (ncol(Delta) != ncol(X1)){
+        stop("number of columns of penalty matrix does not equal number of
            columns of design matrix X")}
+    }
+
+
     optPenalties <- .optPenaltyGLM.kCVauto2(Y = Y, X = X1, U = U1,
                                             lambdaInit = lambdaInit,
                                             lambdaGinit = alphaInit, Dg = Delta,
                                             model = model, folds = folds,
+                                            symFusion = symFusion,
+                                            Tree = Tree,
                                             loss = loss,
                                             multistart = multistart,
                                             maxIter = maxIter)
@@ -555,8 +577,9 @@ PenOpt <- function(Tree, X, Y, Z, model = NULL,
 #'
 #' Fits a fusedTree model by solving a penalized regression problem using
 #' either a linear, logistic, or Cox model. The model includes both a standard
-#' ridge (L2) penalty and an optional fusion penalty to encourage similarity
-#' between leaf node-specific omics effects.
+#' ridge (L2) penalty and a fusion penalty to encourage similarity
+#' between leaf node-specific omics effects. The fusion penalty can also be
+#' omitted by specifying `alpha = 0`.
 #'
 #' @param Tree The fitted tree object. Should be created using \code{rpart}.
 #'   Support for other tree-fitting packages (e.g., \code{partykit}) may be
@@ -576,6 +599,13 @@ PenOpt <- function(Tree, X, Y, Z, model = NULL,
 #'   One of: \code{"linear"}, \code{"logistic"}, or \code{"cox"}.
 #' @param lambda Numeric. Value for the standard ridge (L2) penalty.
 #' @param alpha Numeric. Value for the fusion penalty.
+#' The fusion penalty is not incorporated when `alpha = 0` is specified.
+#' @param symFusion Logical. Whether fusion should be symmetric across nodes.
+#' Setting this parameter to \code{FALSE} induces assymetric fusion. That is,
+#' nodes having more similar predictions (using only clinical variables)
+#' of the response will be shrunk more to each other than nodes having more
+#' distinct predictions. Setting to \code{FALSE} is not tested very well so
+#' use on your own risk. Defaults to \code{TRUE}.
 #' @param maxIter Integer. Maximum number of iterations for the IRLS (iterative
 #'   reweighted least squares) algorithm. Used only when \code{model = "logistic"} or \code{"cox"}.
 #'   Defaults to 50.
@@ -585,7 +615,7 @@ PenOpt <- function(Tree, X, Y, Z, model = NULL,
 #' @param dat Logical. Whether to return the data used in model fitting
 #'   (i.e., omics, clinical, and response). Defaults to \code{FALSE}.
 #' @param verbose Logical. Whether to print progress updates from the IRLS algorithm.
-#'   Only applies to \code{model = "logistic"} or \code{"cox"}.
+#'   Only applies to \code{model = "logistic"} or \code{model ="cox"}.
 #'
 #' @return A list with the following components:
 #' \describe{
@@ -670,12 +700,13 @@ PenOpt <- function(Tree, X, Y, Z, model = NULL,
 
 
 fusedTree <- function(Tree, X, Y, Z, LinVars = TRUE, model,
-                         lambda, alpha, maxIter = 50, minSuccDiff = 10^(-10),
-                         dat = FALSE, verbose = TRUE) {
+                      lambda, alpha, symFusion = TRUE,
+                      maxIter = 50, minSuccDiff = 10^(-10),
+                      dat = FALSE, verbose = TRUE) {
 
   ## control statements ##
   if (!inherits(Tree, "rpart")) {
-    stop("Tree is not a rpart object")}
+    stop("Tree is not an rpart object")}
 
   if (!(model %in% c("linear", "logistic", "cox"))) {
     stop("Model should be specified as linear, logistic, or cox")
@@ -688,7 +719,10 @@ fusedTree <- function(Tree, X, Y, Z, LinVars = TRUE, model,
     stop("Clinical covariates  not specified")}
 
   if (length(Y) == 0) {
-    stop("Y vector is empty")}
+    stop("Y vector has length zero")}
+
+  if (is.null(Y) | is.null(X) | is.null(Z)) {
+    stop("Either Y, X, or Z is unspecified")}
 
   if (!(is.numeric(Y) || inherits(Y, "Surv"))) {
     stop("Y is not a numeric or Surv object. If Y is binary please specify it as numeric vector coded with 0 and 1")}
@@ -698,11 +732,15 @@ fusedTree <- function(Tree, X, Y, Z, LinVars = TRUE, model,
 
   if (inherits(Z, "matrix")) {
     Z <- data.frame(Z)}
+
   if (!inherits(Z, "data.frame")) {
     stop("Z should be specified as a data.frame or matrix")}
 
   if (!is.logical(LinVars)) {
     stop("'LinVars' is not logical, specify as either TRUE or FALSE")}
+
+  if (!is.logical(symFusion)) {
+    stop("'symFusion' is not logical, specify as either TRUE or FALSE")}
 
   if (!is.logical(verbose)) {
     stop("'verbose' is not logical, specify as either TRUE or FALSE")}
@@ -738,6 +776,7 @@ fusedTree <- function(Tree, X, Y, Z, LinVars = TRUE, model,
 
   if(lambda <= 0){
     stop("Ridge penalty 'lambda' should be larger than zero")}
+
   if(alpha < 0){
     stop("Fusion penalty 'alpha' should be zero or positive")}
 
@@ -769,28 +808,33 @@ fusedTree <- function(Tree, X, Y, Z, LinVars = TRUE, model,
 
   if (NumNodes > 1){
 
-    Dat = Dat_Tree(Tree = Tree, X = X, Z = Z,  LinVars = LinVars)
+    Dat <- Dat_Tree(Tree = Tree, X = X, Z = Z,  LinVars = LinVars)
 
-    X1 = Dat$Omics; U1 = Dat$Clinical
+    X1 <- Dat$Omics; U1 <- Dat$Clinical
     remove(Dat)
     NumNod = ncol(X1)/ncol(X)
 
     if (alpha == 0){
-      Delta <- matrix(0, ncol=ncol(X1), nrow=ncol(X1))
+      Delta <- NULL
     }
     if (alpha > 0){
-      Delta = .PenMatr(NumNodes = NumNod, p = ncol(X))
+      Delta = .PenMatr(NumNodes = NumNod, p = ncol(X),
+                       symmetric = symFusion, Tree = Tree)
+      if (ncol(Delta) != ncol(X1)){
+        stop("number of columns of penalty matrix does not equal number of
+           columns of design matrix X")}
     }
 
     Fit = .ridgeGLM2(Y = Y, U = U1, X = X1,
                      lambda = lambda, lambdaG = alpha, Dg = Delta,
-                     model = model, maxIter = maxIter, minSuccDiff = minSuccDiff,
+                     model = model, symFusion = symFusion, Tree = Tree,
+                     maxIter = maxIter, minSuccDiff = minSuccDiff,
                      verbose = verbose)
 
     if (model == "linear" || model == "logistic") {
       names(Fit) <- c(colnames(U1),colnames(X1))
       Pars = cbind.data.frame("Model" = model, "LinVar" = LinVars, "Alpha" = alpha,"Lambda" = lambda)
-      if (dat == TRUE){
+      if (isTRUE(dat)){
         res <- list(Tree = Tree, Effects = Fit, Pars = Pars, Omics = X1, Clinical = U1, Response = Y)
       } else {
         res <- list(Tree = Tree, Effects = Fit, Pars = Pars)}
@@ -800,13 +844,11 @@ fusedTree <- function(Tree, X, Y, Z, LinVars = TRUE, model,
       Breslow <- Fit$Breslow
       names(Effects) <- c(colnames(U1),colnames(X1))
       Pars = cbind.data.frame("Model" = model, "LinVar" = LinVars, "Alpha" = alpha,"Lambda" = lambda)
-      if (dat == TRUE){
+      if (isTRUE(dat)){
         res <- list(Tree = Tree, Effects = Effects, Breslow = Breslow, Pars = Pars, Omics = X1, Clinical = U1, Response = Y)
       } else {
         res <- list(Tree = Tree, Effects = Effects, Breslow = Breslow, Pars = Pars)}
     }
-
-
   }
   class(res) <- "fusedTree"
   return(res)
@@ -870,6 +912,7 @@ fusedTree <- function(Tree, X, Y, Z, LinVars = TRUE, model,
 
 
 predict.fusedTree <- function(object, newX, newZ, newY, ...) {
+
   # ---- Check inputs ----
   if (!inherits(object, "fusedTree")) stop("Object must be of class 'fusedTree'.")
   if (!is.matrix(newX)) stop("newX must be a matrix.")
@@ -878,6 +921,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
   if (ncol(newX) == 0 || nrow(newX) == 0) stop("newX has zero columns or rows.")
   if (ncol(newZ) == 0 || nrow(newZ) == 0) stop("newZ has zero columns or rows.")
   if (length(newY) == 0) stop("newY is empty.")
+  if (is.null(newY) | is.null(newX) | is.null(newZ)) {stop("Either newY, newX, or newZ is unspecified")}
 
   # ---- Extract components from model object ----
   Tree     <- object$Tree
@@ -946,7 +990,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     rownames(S_test) <- paste0("Subject_", seq_len(nrow(S_test)))
 
     return(list(
-      data = data.frame(Resp = newY, LinPred = LP),
+      LinPred = data.frame(Resp = newY, LinPred = LP),
       Survival = S_test
     ))
   } else {
@@ -959,42 +1003,101 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 ################################### Auxiliary Functions #######################
 ###############################################################################
 
-
-
-.PenMatr <- function(NumNodes,p){
+.PenMatr <- function(NumNodes, p, symmetric = TRUE, Tree = NULL){
 
   ## ---------------------------------------------------------------------
   ## Creates the right penalty matrix for given dimension of omics vars (p)
   ## and numer of leaf nodes (NumNodes)
   ## ---------------------------------------------------------------------
 
-  block = base::diag(1,nrow = NumNodes, ncol = NumNodes) -
-    1 / NumNodes * matrix(1,nrow = NumNodes,ncol = NumNodes)
-  Omega = Matrix::kronecker(Matrix::Diagonal(p, 1), block)
-  return(as.matrix(Omega))
+  if (isTRUE(symmetric)) {
+
+    block <- base::diag(1,nrow = NumNodes, ncol = NumNodes) -
+      1 / NumNodes * matrix(1, nrow = NumNodes,ncol = NumNodes)
+  }
+
+  if (isFALSE(symmetric)) {
+    blocksqrt <- base::diag(1,nrow = NumNodes, ncol = NumNodes) -
+      .compute_weight_matrix(Tree = Tree)
+    block <- base::t(blocksqrt) %*% blocksqrt
+  }
+
+  Omega <- Matrix::kronecker(Matrix::Diagonal(p, 1), block)
+  #Omega <- as.matrix(Omega)
+  return(Omega)
 }
 
-.EigPenmatr <- function(NumNodes,p){
+.EigPenmatr <- function(NumNodes, p, symmetric = TRUE, Tree = NULL){
 
   ## ---------------------------------------------------------------------
   ## Computes eigen decomposition efficiently of the penalty matrix
   ## required for efficient cross-validation
   ## ---------------------------------------------------------------------
 
-  Eig_base = base::eigen(.PenMatr(NumNodes, 1))$vectors
+  Eig_base = base::eigen(.PenMatr(NumNodes = NumNodes, p = 1,
+                                  symmetric = symmetric,
+                                  Tree = Tree))$vectors
 
   Eigvecs = Matrix::kronecker(Matrix::Diagonal(p,1),Eig_base)
-  diags = rep(c(rep(1, NumNodes - 1), 0), p)
+  diags = base::rep(c(base::rep(1, NumNodes - 1), 0), p)
   return(list(values = diags,vectors = as.matrix(Eigvecs)))
+}
+
+.compute_weight_matrix <- function(Tree) {
+  # Extract predicted values for each terminal node
+
+  if (!inherits(Tree, "rpart")) {
+    stop("Tree is not an rpart object")}
+
+  method <- Tree$method
+
+  # regression
+  if (method == "anova") {
+    terminal_preds <- Tree$frame$yval[Tree$frame$var == "<leaf>"]
+
+  } else if (method == "class") {
+    terminal_preds <- Tree$frame$yval2[,7][Tree$frame$var == "<leaf>"]
+
+  } else if (method %in% c("poisson", "exp")) {
+    terminal_preds <- Tree$frame$yval[Tree$frame$var == "<leaf>"]
+
+  } else {
+    stop("Unsupported rpart method: ", method)
+  }
+
+  M <- base::length(terminal_preds)
+  # Compute ranks
+  ranks <- base::rank(terminal_preds)
+
+  rank_diff <- matrix(0, nrow = M, ncol = M)
+
+
+
+  # Fill upper triangle and copy to lower (symmetry)
+  for (m in 1:(M - 1)) {
+    for (m2 in (m + 1):M) {
+      diff <- (ranks[m] - ranks[m2])^2
+      rank_diff[m, m2] <- diff
+      rank_diff[m2, m] <- diff
+    }
+  }
+
+  # Set diagonal to 1
+  # Convert to weight matrix
+
+  base::diag(rank_diff) <- 0
+  w_matrix <- 1 / (1 + rank_diff)
+
+  # Normalize
+  w_matrix <- w_matrix/base::rowSums(w_matrix)
+
+  return(w_matrix)
 }
 
 
 .is_single_positive_integer <- function(x) {
   is.numeric(x) && length(x) == 1 && x == as.integer(x) && x > 0
 }
-
-
-
 
 ###############################################################################
 ######## Auxiliary Functions for ridge estimation. Strong inspiration #########
@@ -1003,9 +1106,9 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
 .ridgeGLM2 <- function(Y, X, U,
                        lambda, lambdaG = 0,
-                       Dg = matrix(0, ncol=ncol(X), nrow=ncol(X)),
-                       model,
-                       minSuccDiff=10^(-10), maxIter=100, verbose = FALSE){
+                       Dg = NULL,
+                       model, symFusion = TRUE, Tree = NULL,
+                       minSuccDiff = 10^(-10), maxIter = 100, verbose = FALSE){
 
   ## ---------------------------------------------------------------------
   ## Ridge estimation of the regression parameter of the
@@ -1028,21 +1131,34 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
   ## ---------------------------------------------------------------------
   ## Authors      : Wessel N. van Wieringen, modified by JM Goedhart
   ## ---------------------------------------------------------------------
+  if (is.null(Y) | is.null(X) | is.null(U)) {stop("Either Y, X, or U is unspecified")}
   if (ncol(X) == 0 | nrow(X) == 0) {stop("Omics matrix has zero columns or rows")}
   if (ncol(U) == 0 | nrow(U) == 0) {stop("Clinical matrix has zero columns or rows")}
-  if (length(Y) == 0){stop("Response Y is empty")}
+  if (length(Y) == 0) {stop("Length Y vector is zero")}
+
+
 
   if (model == "linear"){
-    return(.ridgeLM(Y, X, U, lambda, lambdaG, Dg, verbose = verbose))
+    return(.ridgeLM(Y = Y, X = X, U = U, lambda = lambda,
+                    lambdaG = lambdaG, Dg = Dg,
+                    symFusion = symFusion,Tree = Tree,
+                    verbose = verbose))
   }
 
   if (model == "logistic"){
-    return(.ridgeBLM(Y, X, U, lambda, lambdaG, Dg,
-                     minSuccDiff, maxIter, verbose = verbose))
+    return(.ridgeBLM(Y = Y, X = X, U = U, lambda = lambda,
+                     lambdaG = lambdaG, Dg = Dg,
+                     symFusion = symFusion,Tree = Tree,
+                     minSuccDiff = minSuccDiff, maxIter = maxIter,
+                     verbose = verbose))
   }
 
   if (model == "cox"){
-    return(.ridgeSurv(Y,X,U,lambda,lambdaG, Dg, minSuccDiff,maxIter, verbose = verbose))
+    return(.ridgeSurv(Y = Y, X = X, U = U, lambda = lambda,
+                      lambdaG = lambdaG, Dg = Dg,
+                      symFusion = symFusion,Tree = Tree,
+                      minSuccDiff = minSuccDiff, maxIter = maxIter,
+                      verbose = verbose))
   }
 }
 
@@ -1055,7 +1171,9 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
                                     Dg,
                                     model = "linear",
                                     folds,
-                                    loss="loglik",
+                                    symFusion = TRUE,
+                                    Tree = NULL,
+                                    loss = "loglik",
                                     multistart = FALSE,
                                     minSuccDiff = 10^(-5),
                                     maxIter = 30){
@@ -1091,6 +1209,10 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
   ####----------------------------------------------------------------###
   ####----------------------------------------------------------------###
+  if (ncol(X) == 0 | nrow(X) == 0) {stop("Omics matrix has zero columns or rows")}
+  if (ncol(U) == 0 | nrow(U) == 0) {stop("Clinical matrix has zero columns or rows")}
+  if (length(Y) == 0){stop("Length Y vector is zero")}
+  if (is.null(Y) | is.null(X) | is.null(U)) {stop("Either Y, X, or Z is unspecified")}
 
   if (lambdaGinit == 0){
     message("Tuning fusedTree without fusion penalty, as alphaInit = 0 is specified")
@@ -1100,46 +1222,48 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
       if (ncol(X) >= nrow(X)){
         lambdasOpt <- stats::optim(log(lambdaInit),
                             .kcvLMloss_PgeqN_UP_noGP,
-                            Y=Y,
-                            X=X,
-                            U=U,
-                            folds=folds,
-                            loss=loss,
+                            Y = Y,
+                            X = X,
+                            U = U,
+                            folds = folds,
+                            loss = loss,
                             method = "Brent",
                             lower = log(0.1), upper = log(10^10),
-                            control = list(reltol=1e-5, trace = 1, parscale =log(2))
+                            control = list(reltol = 1e-5, trace = 1, parscale =log(2))
         )$par
         return(exp(lambdasOpt))
       }
       if (ncol(X) < nrow(X)){
         lambdasOpt <- stats::optim(log(lambdaInit),
                             .kcvLMloss_PleqN_UP_GPandNoGP,
-                            Y=Y,
-                            X=X,
-                            U=U,
-                            folds=folds,
-                            loss=loss,
+                            Y = Y,
+                            X = as.matrix(X),
+                            U = U,
+                            folds = folds,
+                            loss = loss,
                             method = "Brent",
                             lower = log(0.1), upper = log(10^10),
-                            control = list(reltol=1e-5, trace = 1, parscale =log(2))
+                            control = list(reltol = 1e-5, trace = 1, parscale =log(2))
         )$par
         return(exp(lambdasOpt))
       }
     }
 
     if (model == "logistic"){
+
       if(loss != "loglik"){stop("For logistic model, only loglik loss is implemented")}
+
       lambdasOpt <- stats::optim(log(lambdaInit),
                           .kcvBLMloss_UP_noGP,
-                          Y=Y,
-                          X=X,
-                          U=U,
-                          folds=folds,
-                          maxIter=maxIter,
-                          minSuccDiff=minSuccDiff,
-                          method="Brent",
+                          Y = Y,
+                          X = X,
+                          U = U,
+                          folds = folds,
+                          maxIter = maxIter,
+                          minSuccDiff = minSuccDiff,
+                          method = "Brent",
                           lower = log(0.1), upper = log(10^10),
-                          control = list(reltol=1e-5, trace = 1, parscale =log(2))
+                          control = list(reltol = 1e-5, trace = 1, parscale =log(2))
       )$par
       return(exp(lambdasOpt))
     }
@@ -1148,12 +1272,12 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
       lambdasOpt <- stats::optim(log(lambdaInit),
                           .kcvSurvloss_UP_noGP,
-                          Y=Y,
-                          X=X,
-                          U=U,
-                          folds=folds,
-                          maxIter=maxIter,
-                          minSuccDiff=minSuccDiff,
+                          Y = Y,
+                          X = X,
+                          U = U,
+                          folds = folds,
+                          maxIter = maxIter,
+                          minSuccDiff = minSuccDiff,
                           method = "Brent",
                           lower = log(0.1), upper = log(10^10),
                           control = list(reltol=1e-5, trace = 1, parscale =log(2))
@@ -1167,12 +1291,13 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
     if (model == "linear") {
       if (ncol(X) >= nrow(X)){
+
         NumNodes = length(which(Dg[1,]!=0))
+        Dg <- .EigPenmatr(NumNodes = NumNodes, p = ncol(X)/NumNodes,
+                          symmetric = symFusion,
+                          Tree = Tree)  #fast eigendecomposition
 
-
-        Dg <- .EigPenmatr(NumNodes = NumNodes, p = ncol(X)/NumNodes) #fast eigendecomposition
-
-        if (multistart == TRUE) {
+        if (isTRUE(multistart)) {
           starts <- list(
             log(c(lambdaInit, lambdaGinit)),
             log(0.1) * log(c(lambdaInit, lambdaGinit)),
@@ -1190,7 +1315,8 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
                   folds = folds,
                   loss = loss,
                   method = "Nelder-Mead",
-                  control = list(reltol = 1e-5, maxit = 1000, parscale = c(log(2),log(2)))
+                  control = list(reltol = 1e-5, maxit = 1000,
+                                 parscale = c(log(2), log(2)))
             )
           })
 
@@ -1199,17 +1325,18 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
           lambdasOpt <- exp(best_res$par)
           return(lambdasOpt)
         }
-        if (multistart == FALSE) {
+        if (isFALSE(multistart)) {
           lambdasOpt <- stats::optim(log(c(lambdaInit, lambdaGinit)),
                               .kcvLMloss_PgeqN_UP_GP,
                               Y = Y,
                               X = X %*% Dg$vectors,
                               U = U,
                               Ds = Dg$values,
-                              folds=folds,
-                              loss=loss,
+                              folds = folds,
+                              loss = loss,
                               method = "Nelder-Mead",
-                              control = list(reltol=1e-5, parscale = c(log(2),log(2)))
+                              control = list(reltol = 1e-5,
+                                             parscale = c(log(2), log(2)))
           )$par
           return(exp(lambdasOpt))
         }
@@ -1217,7 +1344,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
       }
       if (ncol(X) < nrow(X)) {
 
-        if (multistart == TRUE) {
+        if (isTRUE(multistart)) {
           starts <- list(
             log(c(lambdaInit, lambdaGinit)),
             log(0.1) * log(c(lambdaInit, lambdaGinit)),
@@ -1228,14 +1355,15 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
           results <- lapply(starts, function(start) {
             stats::optim(start,
                   .kcvLMloss_PleqN_UP_GPandNoGP,
-                  Y=Y,
-                  X=X,
-                  U=U,
-                  Dg=Dg,
-                  folds=folds,
-                  loss=loss,
+                  Y = Y,
+                  X = as.matrix(X),
+                  U = U,
+                  Dg = as.matrix(Dg),
+                  folds = folds,
+                  loss = loss,
                   method = "Nelder-Mead",
-                  control = list(reltol=1e-5, parscale = c(log(2),log(2)))
+                  control = list(reltol=1e-5,
+                                 parscale = c(log(2), log(2)))
             )
           })
           best_res <- results[[which.min(sapply(results, `[[`, "value"))]]
@@ -1243,15 +1371,15 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
           return(lambdasOpt)
         }
 
-        if (multistart == FALSE) {
+        if (isFALSE(multistart)) {
           lambdasOpt <- stats::optim(log(c(lambdaInit, lambdaGinit)),
                               .kcvLMloss_PleqN_UP_GPandNoGP,
-                              Y=Y,
-                              X=X,
-                              U=U,
-                              Dg=Dg,
-                              folds=folds,
-                              loss=loss,
+                              Y = Y,
+                              X = as.matrix(X),
+                              U = U,
+                              Dg = as.matrix(Dg),
+                              folds = folds,
+                              loss = loss,
                               method = "Nelder-Mead",
                               control = list(reltol=1e-5, parscale = c(log(2),log(2)))
           )$par
@@ -1263,7 +1391,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     if (model == "logistic"){
       if(loss != "loglik"){stop("For logistic model, only loglik loss is implemented")}
 
-      if (multistart == TRUE) {
+      if (isTRUE(multistart)) {
         starts <- list(
           log(c(lambdaInit, lambdaGinit)),
           log(0.1) * log(c(lambdaInit, lambdaGinit)),
@@ -1274,15 +1402,18 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         results <- lapply(starts, function(start) {
           stats::optim(start,
                 .kcvBLMloss_UP_GP,
-                Y=Y,
-                X=X,
-                U=U,
-                Dg=Dg,
-                folds=folds,
-                maxIter=maxIter,
-                minSuccDiff=minSuccDiff,
+                Y = Y,
+                X = X,
+                U = U,
+                Dg = Dg,
+                folds = folds,
+                symFusion = symFusion,
+                Tree = Tree,
+                maxIter = maxIter,
+                minSuccDiff = minSuccDiff,
                 method = "Nelder-Mead",
-                control = list(reltol=1e-5, parscale = c(log(2),log(2)))
+                control = list(reltol = 1e-5,
+                               parscale = c(log(2), log(2)))
           )
         })
         best_res <- results[[which.min(sapply(results, `[[`, "value"))]]
@@ -1290,18 +1421,21 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         return(lambdasOpt)
       }
 
-      if (multistart == FALSE) {
+      if (isFALSE(multistart)) {
         lambdasOpt <- stats::optim(log(c(lambdaInit, lambdaGinit)),
                             .kcvBLMloss_UP_GP,
-                            Y=Y,
-                            X=X,
-                            U=U,
-                            Dg=Dg,
-                            folds=folds,
-                            maxIter=maxIter,
+                            Y = Y,
+                            X = X,
+                            U = U,
+                            Dg = Dg,
+                            folds = folds,
+                            symFusion = symFusion,
+                            Tree = Tree,
+                            maxIter = maxIter,
                             minSuccDiff=minSuccDiff,
                             method = "Nelder-Mead",
-                            control = list(reltol=1e-5, parscale = c(log(2),log(2)))
+                            control = list(reltol = 1e-5,
+                                           parscale = c(log(2), log(2)))
         )$par
         return(exp(lambdasOpt))
       }
@@ -1310,7 +1444,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     if (model == "cox"){
       if(loss != "loglik"){stop("For survival model, only loglik loss is implemented")}
 
-      if (multistart == TRUE) {
+      if (isTRUE(multistart)) {
         starts <- list(
           log(c(lambdaInit, lambdaGinit)),
           log(0.1) * log(c(lambdaInit, lambdaGinit)),
@@ -1322,15 +1456,18 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         results <- lapply(starts, function(start) {
           stats::optim(start,
                 .kcvSurvloss_UP_GP,
-                Y=Y,
-                X=X,
-                U=U,
-                Dg=Dg,
-                folds=folds,
-                maxIter=maxIter,
-                minSuccDiff=minSuccDiff,
+                Y = Y,
+                X = X,
+                U = U,
+                Dg = Dg,
+                folds = folds,
+                symFusion = symFusion,
+                Tree = Tree,
+                maxIter = maxIter,
+                minSuccDiff = minSuccDiff,
                 method = "Nelder-Mead",
-                control = list(reltol=1e-5, parscale = c(log(2),log(2)))
+                control = list(reltol = 1e-5,
+                               parscale = c(log(2), log(2)))
           )
         })
         best_res <- results[[which.min(sapply(results, `[[`, "value"))]]
@@ -1338,18 +1475,21 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         return(lambdasOpt)
       }
 
-      if (multistart == FALSE) {
+      if (isFALSE(multistart)) {
         lambdasOpt <- stats::optim(log(c(lambdaInit, lambdaGinit)),
                             .kcvSurvloss_UP_GP,
-                            Y=Y,
-                            X=X,
-                            U=U,
-                            Dg=Dg,
-                            folds=folds,
-                            maxIter=maxIter,
-                            minSuccDiff=minSuccDiff,
+                            Y = Y,
+                            X = X,
+                            U = U,
+                            Dg = Dg,
+                            folds = folds,
+                            symFusion = symFusion,
+                            Tree = Tree,
+                            maxIter = maxIter,
+                            minSuccDiff = minSuccDiff,
                             method = "Nelder-Mead",
-                            control = list(reltol=1e-5, parscale = c(log(2),log(2)))
+                            control = list(reltol = 1e-5,
+                                           parscale = c(log(2), log(2)))
         )$par
         return(exp(lambdasOpt))
       }
@@ -1388,33 +1528,33 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
   lambda <- exp(lambda) # positivity constraint
 
   # calculation prior to cv-loop
-  XXT     <-tcrossprod(X) / lambda
+  XXT     <- Matrix::tcrossprod(X) / lambda
 
 
   for (k in 1:length(folds)){
     # evaluate the estimator of the unpenalized low-dimensional
     # regression parameter on the training samples
     if (all(dim(U) > 0)){
-      gHat <- solve(crossprod(U[-folds[[k]],,drop=FALSE],
-                              solve(XXT[-folds[[k]], -folds[[k]]] +
-                                      diag(nrow(XXT)-length(folds[[k]])),
-                                    U[-folds[[k]],,drop=FALSE])),
-                    crossprod(U[-folds[[k]],,drop=FALSE],
-                              solve(XXT[-folds[[k]], -folds[[k]]] +
-                                      diag(nrow(XXT)-length(folds[[k]])),
-                                    Y[-folds[[k]]])))
+      gHat <- Matrix::solve(Matrix::crossprod(U[-folds[[k]],,drop=FALSE],
+                            Matrix::solve(XXT[-folds[[k]], -folds[[k]]] +
+                            Matrix::diag(nrow(XXT)-length(folds[[k]])),
+                            U[-folds[[k]],,drop=FALSE])),
+                            Matrix::crossprod(U[-folds[[k]],,drop=FALSE],
+                            Matrix::solve(XXT[-folds[[k]], -folds[[k]]] +
+                            Matrix::diag(nrow(XXT)-length(folds[[k]])),
+                            Y[-folds[[k]]])))
       gHat <- as.numeric(gHat)
     }
 
     # evaluate the linear predictor on the left-out samples
     if (all(dim(U) > 0)){
-      Yhat <-tcrossprod(solve(diag(rep(1, nrow(XXT)-length(folds[[k]]))) +
-                                XXT[-folds[[k]], -folds[[k]]],
+      Yhat <- Matrix::tcrossprod(Matrix::solve(Matrix::diag(rep(1, nrow(XXT)-length(folds[[k]]))) +
+                              XXT[-folds[[k]], -folds[[k]]],
                               Y[-folds[[k]]] -
-                                as.numeric(crossprod(t(U[-folds[[k]],,drop=FALSE]), gHat))),
+                              as.numeric(Matrix::crossprod(Matrix::t(U[-folds[[k]],,drop=FALSE]), gHat))),
                         XXT[folds[[k]], -folds[[k]], drop=FALSE])
     } else {
-      Yhat <-tcrossprod(solve(diag(rep(1, nrow(XXT)-length(folds[[k]]))) +
+      Yhat <- Matrix::tcrossprod(Matrix::solve(Matrix::diag(rep(1, nrow(XXT)-length(folds[[k]]))) +
                                 XXT[-folds[[k]], -folds[[k]]],
                               Y[-folds[[k]]]),
                         XXT[folds[[k]], -folds[[k]], drop=FALSE])
@@ -1524,7 +1664,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
   # evaluate subexpressions of the estimator
   if (ncol(X) >= nrow(X)){
-    XXT     <-tcrossprod(X)/lambda
+    XXT     <- Matrix::tcrossprod(X)/lambda
   }
 
 
@@ -1550,25 +1690,26 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         Z <- lpOld + (Y[-folds[[k]]] - Ypred)/W0
 
         # evaluate unpenalized low-dim regression estimator
-        diag(XXT)[-folds[[k]]] <- diag(XXT)[-folds[[k]]] + 1/W0
-        slh        <- solve(XXT[-folds[[k]], -folds[[k]]],
+        Matrix::diag(XXT)[-folds[[k]]] <- Matrix::diag(XXT)[-folds[[k]]] + 1/W0
+        slh        <- Matrix::solve(XXT[-folds[[k]], -folds[[k]]],
                             Z)
-        gHat       <- solve(crossprod(U[-folds[[k]],],
-                                      solve(XXT[-folds[[k]], -folds[[k]]],
+        gHat       <- Matrix::solve(Matrix::crossprod(U[-folds[[k]],],
+                                    Matrix::solve(XXT[-folds[[k]], -folds[[k]]],
                                             U[-folds[[k]],])),
-                            crossprod(U[-folds[[k]],], slh))
-        Ug         <-tcrossprod(U, t(gHat))
+                                    Matrix::crossprod(U[-folds[[k]],], slh))
+        Ug         <- Matrix::tcrossprod(U, Matrix::t(gHat))
 
         # evaluate linear predictor without evaluating the estimator
-        slh        <- solve(XXT[-folds[[k]], -folds[[k]], drop=FALSE],
+        slh        <- Matrix::solve(XXT[-folds[[k]], -folds[[k]], drop=FALSE],
                             Z - Ug[-folds[[k]],])
-        diag(XXT)[-folds[[k]]] <- diag(XXT)[-folds[[k]]] - 1/W0
-        lpAll      <-crossprod(XXT[-folds[[k]], ,drop=FALSE], slh)
+        Matrix::diag(XXT)[-folds[[k]]] <- Matrix::diag(XXT)[-folds[[k]]] - 1/W0
+        lpAll      <- Matrix::crossprod(XXT[-folds[[k]], ,drop=FALSE], slh)
         penalty    <- sum(lpAll[-folds[[k]]] * slh) / 2
-        lpAll      <- lpAll + Ug
+        lpAll      <- as.numeric(lpAll) + as.numeric(Ug)
       }
       if (ncol(X) < nrow(X)){
         # adjusted response
+        X <- as.matrix(X)
         Z <- W0*lpOld + (Y[-folds[[k]]] - Ypred)
 
         # evaluate subexpressions of the estimator
@@ -1615,7 +1756,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
       # assess convergence
       if (is.infinite(loglik) | is.na(loglik) | is.nan(loglik)){
-        lpNew=rep(0,nrow(Y[folds[[k]]]))
+        lpNew <- rep(0,nrow(Y[folds[[k]]]))
         break
       } else if (abs((loglik - loglikPrev)/loglikPrev) < minSuccDiff){
         break
@@ -1657,7 +1798,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
   # evaluate subexpressions of the estimator
   if (ncol(X) >= nrow(X)){
-    XXT     <-tcrossprod(X)/lambda
+    XXT     <- Matrix::tcrossprod(X)/lambda
   }
 
 
@@ -1667,8 +1808,8 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     penalty <- 0
     lpPrev <- rep(0, length(Y[,2]))
     lpOld <- rep(0, length(Y[-folds[[k]],2]))
-    loglikPrev <- .loglikSurv(Y=Y[-folds[[k]],], lp=lpOld) - penalty
-    Yev = Y[-folds[[k]],2]
+    loglikPrev <- .loglikSurv(survival::Surv(time=Y[-folds[[k]],1],event = Y[-folds[[k]],2]),lpOld) - penalty
+    Yev <- Y[-folds[[k]],2]
 
     for (iter in 1:maxIter){
       # calculate the weights
@@ -1685,25 +1826,26 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         Z <- lpOld + (Yev - Ypred)/W0
 
         # evaluate unpenalized low-dim regression estimator
-        diag(XXT)[-folds[[k]]] <- diag(XXT)[-folds[[k]]] + 1/W0
-        slh        <- solve(XXT[-folds[[k]], -folds[[k]]],
+        Matrix::diag(XXT)[-folds[[k]]] <- Matrix::diag(XXT)[-folds[[k]]] + 1/W0
+        slh        <- Matrix::solve(XXT[-folds[[k]], -folds[[k]]],
                             Z)
-        gHat       <- solve(crossprod(U[-folds[[k]],],
-                                      solve(XXT[-folds[[k]], -folds[[k]]],
+        gHat       <- Matrix::solve(Matrix::crossprod(U[-folds[[k]],],
+                                    Matrix::solve(XXT[-folds[[k]], -folds[[k]]],
                                             U[-folds[[k]],])),
-                            crossprod(U[-folds[[k]],], slh))
-        Ug         <-tcrossprod(U, t(gHat))
+                              Matrix::crossprod(U[-folds[[k]],], slh))
+        Ug         <- Matrix::tcrossprod(U, Matrix::t(gHat))
 
         # evaluate linear predictor without evaluating the estimator
-        slh        <- solve(XXT[-folds[[k]], -folds[[k]], drop=FALSE],
+        slh        <- Matrix::solve(XXT[-folds[[k]], -folds[[k]], drop=FALSE],
                             Z - Ug[-folds[[k]],])
-        diag(XXT)[-folds[[k]]] <- diag(XXT)[-folds[[k]]] - 1/W0
-        lpAll      <-crossprod(XXT[-folds[[k]], ,drop=FALSE], slh)
+        Matrix::diag(XXT)[-folds[[k]]] <- Matrix::diag(XXT)[-folds[[k]]] - 1/W0
+        lpAll      <- Matrix::crossprod(XXT[-folds[[k]], ,drop=FALSE], slh)
         penalty    <- sum(lpAll[-folds[[k]]] * slh) / 2
-        lpAll      <- lpAll + Ug
+        lpAll      <- as.numeric(lpAll) + as.numeric(Ug)
       }
       if (ncol(X) < nrow(X)){
         # adjusted response
+        X <- as.matrix(X)
         Z <- W0*lpOld + (Yev - Ypred)
 
         # evaluate subexpressions of the estimator
@@ -1803,34 +1945,36 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
   lambdaG <- exp(lambdas[2]) # positivity constraint
 
   # calculation prior to cv-loop
-  X       <- sweep(X, 2, sqrt(lambda + lambdaG * Ds), FUN="/")
-  XXT     <-tcrossprod(X)
+  #X <- sweep(X, 2, sqrt(lambda + lambdaG * Ds), FUN="/")
+  D <- Matrix::Diagonal(x = 1 / sqrt(lambda + lambdaG * Ds))
+  X <- X %*% D
+  XXT     <- Matrix::tcrossprod(X)
 
 
   for (k in 1:length(folds)){
     # evaluate the estimator of the unpenalized low-dimensional
     # regression parameter on the training samples
     if (all(dim(U) > 0)){
-      gHat <- solve(crossprod(U[-folds[[k]],,drop=FALSE],
-                              solve(XXT[-folds[[k]], -folds[[k]]] +
-                                      diag(nrow(XXT)-length(folds[[k]])),
-                                    U[-folds[[k]],,drop=FALSE])),
-                    crossprod(U[-folds[[k]],,drop=FALSE],
-                              solve(XXT[-folds[[k]], -folds[[k]]] +
-                                      diag(nrow(XXT)-length(folds[[k]])),
+      gHat <- Matrix::solve(Matrix::crossprod(U[-folds[[k]],,drop=FALSE],
+                            Matrix::solve(XXT[-folds[[k]], -folds[[k]]] +
+                            Matrix::diag(nrow(XXT)-length(folds[[k]])),
+                            U[-folds[[k]],,drop=FALSE])),
+                            Matrix::crossprod(U[-folds[[k]],,drop=FALSE],
+                            Matrix::solve(XXT[-folds[[k]], -folds[[k]]] +
+                            Matrix::diag(nrow(XXT)-length(folds[[k]])),
                                     Y[-folds[[k]]])))
       gHat <- as.numeric(gHat)
     }
     if (all(dim(U) > 0)){
-      Yhat   <- as.numeric(crossprod(t(XXT[folds[[k]], -folds[[k]]]),
-                                     solve(diag(rep(1, nrow(XXT)-length(folds[[k]]))) +
+      Yhat   <- as.numeric(Matrix::crossprod(Matrix::t(XXT[folds[[k]], -folds[[k]]]),
+                           Matrix::solve(diag(rep(1, nrow(XXT)-length(folds[[k]]))) +
                                              XXT[-folds[[k]], -folds[[k]]],
-                                           Y[-folds[[k]]] - as.numeric(crossprod(t(U[-folds[[k]],,drop=FALSE]), gHat)))))
-      + as.numeric(crossprod(t(U[-folds[[k]],,drop=FALSE]),gHat))
+                          Y[-folds[[k]]] - as.numeric(Matrix::crossprod(Matrix::t(U[-folds[[k]],,drop=FALSE]), gHat)))))
+      + as.numeric(Matrix::crossprod(Matrix::t(U[-folds[[k]],,drop=FALSE]),gHat))
 
     } else {
       Yhat   <-
-        tcrossprod(solve(diag(rep(1, nrow(XXT)-length(folds[[k]]))) +
+        Matrix::tcrossprod(Matrix::solve(diag(rep(1, nrow(XXT)-length(folds[[k]]))) +
                            XXT[-folds[[k]], -folds[[k]]],
                          Y[-folds[[k]]]),
                    XXT[folds[[k]], -folds[[k]], drop=FALSE])
@@ -1854,7 +1998,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 }
 
 .kcvBLMloss_UP_GP <- function(lambdas, Y, X, U, Dg, folds,
-                              minSuccDiff, maxIter){
+                              minSuccDiff, maxIter, symFusion, Tree){
 
   ## ---------------------------------------------------------------------
   ## Function yields the cross-validated loglikelihood of the ridge
@@ -1882,30 +2026,25 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
   # evaluate subexpressions of the estimator
   if (ncol(X) >= nrow(X)){
     NumNodes = length(which(Dg[1,]!=0)); pX=ncol(Dg)/NumNodes
-    Dg <-Matrix::tcrossprod(Matrix::kronecker(Matrix::Diagonal(pX,1),
-                                              Matrix::solve(lambdaG*.PenMatr(NumNodes,1)+Matrix::Diagonal(NumNodes,lambda)))
-                            ,X)
-    Dg <- as.matrix(Dg)
+    Dg <-Matrix::tcrossprod(Matrix::kronecker(Matrix::diag(1,pX),Matrix::solve(lambdaG*.PenMatr(NumNodes,1, symmetric = symFusion, Tree = Tree) +
+                            Matrix::diag(lambda,NumNodes)))
+                    ,X)
 
-    XDXT        <-crossprod(t(X), Dg)
-    diagXDXTorg <- diag(XDXT)
+    XDXT        <- Matrix::crossprod(Matrix::t(X), Dg)
+    diagXDXTorg <- Matrix::diag(XDXT)
   }
+
   if (ncol(X) < nrow(X)){
+    Dg <- as.matrix(Dg)
     Dg   <- diag(rep(lambda, ncol(X))) + lambdaG * Dg
   }
 
-
   for (k in 1:length(folds)){
-
-
-
-
     # initialization
     penalty    <-  0
     lpOld <- rep(log(mean(Y[-folds[[k]]])/(1-mean(Y[-folds[[k]]]))), length(Y[-folds[[k]]]))
     lpPrev <- rep(log(mean(Y)/(1-mean(Y))), length(Y))
     loglikPrev <- .loglikBLMlp(Y = Y[-folds[[k]]], lp = lpOld) #initial likelihood, penalty equals zero
-
 
     for (iter in 1:maxIter){
       # calculate the weights
@@ -1920,27 +2059,29 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         Z <- lpOld + (Y[-folds[[k]]] - Ypred)/W0
 
         # evaluate unpenalized low-dim regression estimator
-        diag(XDXT)[-folds[[k]]] <- diag(XDXT)[-folds[[k]]] + 1/W0
-        slh        <- solve(XDXT[-folds[[k]], -folds[[k]]],Z)
+        Matrix::diag(XDXT)[-folds[[k]]] <- Matrix::diag(XDXT)[-folds[[k]]] + 1/W0
+        slh        <- Matrix::solve(XDXT[-folds[[k]], -folds[[k]]], Z)
 
-        gHat       <- solve(crossprod(U[-folds[[k]],],
-                                      solve(XDXT[-folds[[k]], -folds[[k]]],
+        gHat       <- Matrix::solve(Matrix::crossprod(U[-folds[[k]],],
+                                    Matrix::solve(XDXT[-folds[[k]], -folds[[k]]],
                                             U[-folds[[k]],])),
-                            crossprod(U[-folds[[k]],], slh))
-        Ug         <-tcrossprod(U, t(gHat))
+                                    Matrix::crossprod(U[-folds[[k]],], slh))
+        Ug         <- Matrix::tcrossprod(U, Matrix::t(gHat))
 
         # evaluate linear predictor without evaluating the estimator
-        slh        <- solve(XDXT[-folds[[k]], -folds[[k]], drop=FALSE],
+        slh        <- Matrix::solve(XDXT[-folds[[k]], -folds[[k]], drop=FALSE],
                             Z - Ug[-folds[[k]],])
-        diag(XDXT)[-folds[[k]]] <- diagXDXTorg[-folds[[k]]]
-        lpAll      <-crossprod(XDXT[-folds[[k]], ,drop=FALSE], slh)
+        Matrix::diag(XDXT)[-folds[[k]]] <- diagXDXTorg[-folds[[k]]]
+        lpAll      <- Matrix::crossprod(XDXT[-folds[[k]], ,drop=FALSE], slh)
         penalty    <- 0.5 * sum(lpAll[-folds[[k]]] * slh)
-        lpAll      <- lpAll + Ug
+        lpAll      <- as.numeric(lpAll) + as.numeric(Ug)
       }
 
       if (ncol(X) < nrow(X)){
         # adjusted response
+
         Z <- W0*lpOld + (Y[-folds[[k]]] - Ypred)
+        X <- as.matrix(X)
 
 
         # evaluate subexpressions of the estimator
@@ -2006,7 +2147,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 }
 
 .kcvSurvloss_UP_GP <- function(lambdas, Y, X, U, Dg, folds,
-                               minSuccDiff, maxIter){
+                               minSuccDiff, maxIter, symFusion, Tree){
 
   ## ---------------------------------------------------------------------
   ## Function yields the cross-validated loglikelihood of the ridge
@@ -2036,15 +2177,16 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
   # evaluate subexpressions of the estimator
   if (ncol(X) >= nrow(X)){
     NumNodes = length(which(Dg[1,]!=0)); pX=ncol(Dg)/NumNodes
-    Dg <-tcrossprod(kronecker(diag(1,pX),solve(lambdaG*.PenMatr(NumNodes,1)+diag(lambda,NumNodes)))
+    Dg <- Matrix::tcrossprod(Matrix::kronecker(Matrix::diag(1,pX),Matrix::solve(lambdaG*.PenMatr(NumNodes,1, symmetric = symFusion, Tree = Tree)+
+                                                    Matrix::diag(lambda,NumNodes)))
                     ,X)
-    #Dg <- as.matrix(Dg)
 
-    XDXT        <-crossprod(t(X), Dg)
-    diagXDXTorg <- diag(XDXT)
+    XDXT        <- Matrix::crossprod(Matrix::t(X), Dg)
+    diagXDXTorg <- Matrix::diag(XDXT)
   }
   if (ncol(X) < nrow(X)){
-    Dg   <- diag(rep(lambda, ncol(X))) + lambdaG * Dg
+    Dg <- as.matrix(Dg)
+    Dg   <- diag(rep(lambda, ncol(X))) + lambdaG * as.matrix(Dg)
   }
 
 
@@ -2054,7 +2196,8 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     penalty    <-  0
     lpPrev <- rep(0, length(Y[,2]))
     lpOld <- rep(0, length(Y[-folds[[k]],2]))
-    loglikPrev <- .loglikSurv(Y=Y[-folds[[k]],], lp=lpOld)-penalty
+
+    loglikPrev <- .loglikSurv(survival::Surv(time=Y[-folds[[k]],1],event = Y[-folds[[k]],2]), lp=lpOld)-penalty
     Yev = Y[-folds[[k]],2]
 
 
@@ -2074,26 +2217,27 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         Z <- lpOld + (Yev - Ypred)/W0
 
         # evaluate unpenalized low-dim regression estimator
-        diag(XDXT)[-folds[[k]]] <- diag(XDXT)[-folds[[k]]] + 1/W0
-        slh        <- solve(XDXT[-folds[[k]], -folds[[k]], drop=FALSE],Z)
+        Matrix::diag(XDXT)[-folds[[k]]] <- Matrix::diag(XDXT)[-folds[[k]]] + 1/W0
+        slh        <- Matrix::solve(XDXT[-folds[[k]], -folds[[k]], drop=FALSE], Z)
 
-        gHat       <- solve(crossprod(U[-folds[[k]], , drop=FALSE],
-                                      solve(XDXT[-folds[[k]], -folds[[k]], drop=FALSE],
+        gHat       <- Matrix::solve(Matrix::crossprod(U[-folds[[k]], , drop=FALSE],
+                                    Matrix::solve(XDXT[-folds[[k]], -folds[[k]], drop=FALSE],
                                             U[-folds[[k]], , drop=FALSE])),
-                            crossprod(U[-folds[[k]], , drop=FALSE], slh))
-        Ug         <-tcrossprod(U, t(gHat))
+                                    Matrix::crossprod(U[-folds[[k]], , drop=FALSE], slh))
+        Ug         <- Matrix::tcrossprod(U, Matrix::t(gHat))
 
         # evaluate linear predictor without evaluating the estimator
-        slh        <- solve(XDXT[-folds[[k]], -folds[[k]], drop=FALSE],
+        slh        <- Matrix::solve(XDXT[-folds[[k]], -folds[[k]], drop=FALSE],
                             Z - Ug[-folds[[k]],])
-        diag(XDXT)[-folds[[k]]] <- diagXDXTorg[-folds[[k]]]
-        lpAll      <-crossprod(XDXT[-folds[[k]], ,drop=FALSE], slh)
+        Matrix::diag(XDXT)[-folds[[k]]] <- diagXDXTorg[-folds[[k]]]
+        lpAll      <- Matrix::crossprod(XDXT[-folds[[k]], ,drop=FALSE], slh)
         penalty    <- 0.5 * sum(lpAll[-folds[[k]]] * slh)
-        lpAll      <- lpAll + Ug
+        lpAll      <- as.numeric(lpAll) + as.numeric(Ug)
       }
 
       if (ncol(X) < nrow(X)){
         # adjusted response
+        X <- as.matrix(X)
         Z <- W0*lpOld + (Yev - Ypred)
 
 
@@ -2165,7 +2309,8 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 }
 
 .ridgeLM <- function(Y, X, U, lambda, lambdaG = 0,
-                     Dg = matrix(0, ncol=ncol(X), nrow=ncol(X)), verbose = TRUE){
+                     symFusion, Tree,
+                     Dg = NULL, verbose = TRUE){
   ## ---------------------------------------------------------------------
   ## Function that evaluates ridge regression estimator with a regular and
   ## generalized penalty. The fused penalty is specified by the matrix Dg.
@@ -2195,6 +2340,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
 
     if (nrow(X) >= ncol(X)){
+      X <- as.matrix(X)
       # efficient evaluation for n >= p
 
       # evaluate subexpressions of the estimator
@@ -2217,17 +2363,17 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
       # efficient evaluation for n < p
 
       # evaluate subexpressions of the estimator
-      XXT       <-tcrossprod(X) / lambda
-      diag(XXT) <- diag(XXT) + 1
+      XXT       <- Matrix::tcrossprod(X) / lambda
+      Matrix::diag(XXT) <- Matrix::diag(XXT) + 1
       Y         <- Y
 
       # evaluate unpenalized low-dim regression estimator
-      gHat <- solve(crossprod(U, solve(XXT, U)),
-                    crossprod(U, solve(XXT, Y)))
+      gHat <- Matrix::solve(Matrix::crossprod(U, Matrix::solve(XXT, U)),
+                            Matrix::crossprod(U, Matrix::solve(XXT, Y)))
 
       # evaluate penalized high-dim regression estimator
-      Y    <- Y -crossprod(t(U), gHat)
-      bHat <-crossprod(X, solve(XXT, Y))/lambda
+      Y    <- Y - Matrix::crossprod(Matrix::t(U), gHat)
+      bHat <- Matrix::crossprod(X, Matrix::solve(XXT, Y)) / lambda
     }
   }
 
@@ -2240,6 +2386,8 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
       # efficient evaluation for n >= p
 
       # evaluate subexpressions of the estimator
+      Dg <- as.matrix(Dg)
+      X <- as.matrix(X)
       Dg   <- diag(rep(lambda, ncol(X))) + lambdaG * Dg
       XTX  <-crossprod(X)
       tUTX <-crossprod(X, U)
@@ -2261,28 +2409,28 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
       # evaluate subexpressions of the estimator
       NumNodes = length(which(Dg[1,]!=0)); pX=ncol(Dg)/NumNodes
-      Dg <- Matrix::tcrossprod(Matrix::kronecker(Matrix::Diagonal(pX,1),
-                                                 Matrix::solve(lambdaG*.PenMatr(NumNodes,1)+Matrix::Diagonal(NumNodes,lambda)))
-                               ,X)
-      Dg <- as.matrix(Dg)
+      Dg <-Matrix::tcrossprod(Matrix::kronecker(Matrix::diag(1,pX),Matrix::solve(lambdaG*.PenMatr(NumNodes,1, symmetric = symFusion, Tree = Tree) +
+                                                Matrix::diag(lambda,NumNodes)))
+                      ,X)
 
-
-      XDXTpI <- crossprod(t(X), Dg) + diag(1,nrow(X))
+      XDXTpI <- Matrix::crossprod(Matrix::t(X), Dg) + Matrix::diag(1,nrow(X))
 
       # evaluate unpenalized low-dim regression estimator
-      gHat <- solve(crossprod(U, solve(XDXTpI, U)),
-                    crossprod(U, solve(XDXTpI, Y)))
+      gHat <- Matrix::solve(Matrix::crossprod(U, Matrix::solve(XDXTpI, U)),
+                            Matrix::crossprod(U, Matrix::solve(XDXTpI, Y)))
 
       # evaluate penalized high-dim regression estimator
-      Y    <- Y -crossprod(t(U), gHat)
-      bHat <-tcrossprod(Dg, t(solve(XDXTpI, Y)))[,1]
+      Y    <- Y - Matrix::crossprod(t(U), gHat)
+      bHat <- Matrix::tcrossprod(Dg, Matrix::t(Matrix::solve(XDXTpI, Y)))[,1]
     }
   }
   return(c(as.numeric(gHat), as.numeric(bHat)))
 }
 
 
-.ridgeBLM <- function(Y, X, U, lambda, lambdaG, Dg, minSuccDiff, maxIter, verbose = FALSE){
+.ridgeBLM <- function(Y, X, U, lambda, lambdaG, Dg,
+                      symFusion, Tree,
+                      minSuccDiff, maxIter, verbose = FALSE){
 
   if (lambdaG == 0){
 
@@ -2292,10 +2440,10 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     # initiate
 
     if (ncol(X) >= nrow(X)){
-      XXT <-tcrossprod(X) / lambda
+      XXT <- Matrix::tcrossprod(X) / lambda
     }
     if (ncol(X) >= nrow(X)){
-      tUTX <-crossprod(X, U)
+      tUTX <- Matrix::crossprod(X, U)
     }
     lpPrev <- rep(log(mean(Y)/(1-mean(Y))), length(Y))
     lp      <- rep(log(mean(Y)/(1-mean(Y))), length(Y))
@@ -2316,20 +2464,21 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         Z <- lp + (Y - Ypred)/W0
 
         # now obtain the IRWLS update efficiently
-        diag(XXT) <- diag(XXT) + 1/W0
-        slh       <- solve(XXT, Z)
-        gHat      <- solve(crossprod(U, solve(XXT, U)),
-                           crossprod(U, slh))
-        slh       <- solve(XXT, Z - U %*% gHat)
-        diag(XXT) <- diag(XXT) - 1/W0
-        lp        <-crossprod(XXT, slh)
+        Matrix::diag(XXT) <- Matrix::diag(XXT) + 1/W0
+        slh       <- Matrix::solve(XXT, Z)
+        gHat      <- Matrix::solve(Matrix::crossprod(U, Matrix::solve(XXT, U)),
+                                   Matrix::crossprod(U, slh))
+        slh       <- Matrix::solve(XXT, Z - U %*% gHat)
+        Matrix::diag(XXT) <- Matrix::diag(XXT) - 1/W0
+        lp        <- Matrix::crossprod(XXT, slh)
         penalty   <- sum(lp * slh) / 2
-        lp        <- lp + U %*% gHat
+        lp        <- as.numeric(lp) + as.numeric(U %*% gHat)
         loglik    <- .loglikBLMlp(Y, lp) - penalty
       }
 
       if (ncol(X) < nrow(X)){
         # adjusted response
+        X <- as.matrix(X)
         Z <- W0*lp + (Y - Ypred)
 
         # evaluate subexpressions of the estimator
@@ -2385,7 +2534,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         stop("Not converged yet, please increase maxIter")}
     }
     if (ncol(X) >= nrow(X)){
-      bHat <-crossprod(X, slh) / lambda
+      bHat <- as.numeric(Matrix::crossprod(X, slh)) / lambda
     }
   }
 
@@ -2397,15 +2546,14 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     if (ncol(X) >= nrow(X)){
       # evaluate subexpressions of the estimator
       NumNodes = length(which(Dg[1,]!=0)); pX=ncol(Dg)/NumNodes
-      Dg <-Matrix::tcrossprod(Matrix::kronecker(Matrix::Diagonal(pX,1),
-                                                Matrix::solve(lambdaG*.PenMatr(NumNodes,1)+Matrix::Diagonal(NumNodes,lambda)))
-                              ,X)
-      Dg <- as.matrix(Dg)
-
-      XDXT        <-crossprod(t(X), Dg)
-      diagXDXTorg <- diag(XDXT)
+      Dg <-Matrix::tcrossprod(Matrix::kronecker(Matrix::diag(1,pX),Matrix::solve(lambdaG*.PenMatr(NumNodes,1, symmetric = symFusion, Tree = Tree) +
+                                                Matrix::diag(lambda,NumNodes)))
+                      ,X)
+      XDXT        <- Matrix::crossprod(Matrix::t(X), Dg)
+      diagXDXTorg <- Matrix::diag(XDXT)
     } else {
       # evaluate subexpressions of the estimator
+      Dg <- as.matrix(Dg)
       Dg   <- diag(rep(lambda, ncol(X))) + lambdaG * Dg
     }
 
@@ -2430,21 +2578,20 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         Z <- lp + (Y - Ypred)/W0
 
         # now obtain the IRWLS update efficiently
-        diag(XDXT) <- diag(XDXT) + 1/W0
-        slh        <- qr.solve(XDXT, Z,
-                               tol=.Machine$double.eps)
-        gHat       <- solve(crossprod(U, solve(XDXT, U)),
-                            crossprod(U, slh))
-        slh        <- qr.solve(XDXT, Z - U %*% gHat,
-                               tol=.Machine$double.eps)
-        diag(XDXT) <- diagXDXTorg
-        lp         <-crossprod(XDXT, slh)
+        Matrix::diag(XDXT) <- Matrix::diag(XDXT) + 1/W0
+        slh        <- Matrix::solve(XDXT, Z)
+        gHat       <- Matrix::solve(Matrix::crossprod(U, Matrix::solve(XDXT, U)),
+                                    Matrix::crossprod(U, slh))
+        slh        <- Matrix::solve(XDXT, Z - U %*% gHat)
+        Matrix::diag(XDXT) <- diagXDXTorg
+        lp         <- Matrix::crossprod(XDXT, slh)
         penalty    <- sum(lp * slh) / 2
-        lp         <- lp + U %*% gHat
+        lp         <- as.numeric(lp) + as.numeric(U %*% gHat)
         loglik    <- .loglikBLMlp(Y, lp) - penalty
       }
       if (ncol(X) < nrow(X)){
         # adjusted response
+        X <- as.matrix(X)
         Z <- W0*lp + (Y - Ypred)
 
         # evaluate subexpressions of the estimator
@@ -2504,13 +2651,14 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         stop("Not converged yet, please increase maxIter")}
     }
     if (ncol(X) >= nrow(X)){
-      bHat <- as.numeric(tcrossprod(as.numeric(slh), Dg))
+      bHat <- as.numeric(Matrix::tcrossprod(as.numeric(slh), Dg))
     }
   }
   return(c(as.numeric(gHat), as.numeric(bHat)))
 }
 
-.ridgeSurv <- function(Y,X,U,lambda,lambdaG, Dg, minSuccDiff,maxIter, verbose = FALSE){
+.ridgeSurv <- function(Y, X, U, lambda, lambdaG, Dg, symFusion, Tree,
+                       minSuccDiff, maxIter, verbose = FALSE){
 
 
   if (lambdaG == 0){
@@ -2521,10 +2669,10 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     # initiate
 
     if (ncol(X) >= nrow(X)){
-      XXT <-tcrossprod(X) /lambda
+      XXT <- Matrix::tcrossprod(X) /lambda
     }
     if (ncol(X) >= nrow(X)){
-      tUTX <-crossprod(X, U)
+      tUTX <- Matrix::crossprod(X, U)
     }
 
     #initiate
@@ -2550,24 +2698,20 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         Z <- lp + (Yev - Ypred)/W0
 
         # now obtain the IRWLS update efficiently
-        diag(XXT) <- diag(XXT) + 1/W0
-        slh       <- solve(XXT, Z)
-        gHat      <- solve(crossprod(U, solve(XXT, U)),
-                           crossprod(U, slh))
-
-
-        slh       <- solve(XXT, Z - U %*% gHat)
-        #Z1 <- W0*lp + Yev-Ypred - diag(W0)%*% U %*% gHat
-        diag(XXT) <- diag(XXT) - 1/W0
-        #Hatmat <- XXT-XXT%*%solve(XXT+diag(1/W0),XXT)
-        #lp <- Hatmat %*% Z1
-
-        lp        <-crossprod(XXT, slh)
+        Matrix::diag(XXT) <- Matrix::diag(XXT) + 1/W0
+        slh       <- Matrix::solve(XXT, Z)
+        gHat      <- Matrix::solve(Matrix::crossprod(U, Matrix::solve(XXT, U)),
+                                   Matrix::crossprod(U, slh))
+        slh       <- Matrix::solve(XXT, Z - U %*% gHat)
+        Matrix::diag(XXT) <- Matrix::diag(XXT) - 1/W0
+        lp        <- Matrix::crossprod(XXT, slh)
         penalty   <- sum(lp * slh) / 2
-        lp        <- lp + U %*% gHat
+        lp        <- as.numeric(lp) + as.numeric(U %*% gHat)
       }
+
       if (ncol(X) < nrow(X)){
         # adjusted response
+        X <- as.matrix(X)
         Z <- W0*lp + (Yev - Ypred)
 
         # evaluate subexpressions of the estimator
@@ -2625,7 +2769,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     }
 
     if (ncol(X) >= nrow(X)){
-      bHat <-crossprod(X, slh) / lambda
+      bHat <- as.numeric(Matrix::crossprod(X, slh)) / lambda
     }
   }
 
@@ -2636,15 +2780,14 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     if (ncol(X) >= nrow(X)){
       # evaluate subexpressions of the estimator
       NumNodes = length(which(Dg[1,]!=0)); pX=ncol(Dg)/NumNodes
-      Dg <-Matrix::tcrossprod(Matrix::kronecker(Matrix::Diagonal(pX,1),
-                                                Matrix::solve(lambdaG*.PenMatr(NumNodes,1)+Matrix::Diagonal(NumNodes,lambda)))
-                              ,X)
-      Dg <- as.matrix(Dg)
-
-      XDXT        <-crossprod(t(X), Dg)
-      diagXDXTorg <- diag(XDXT)
+      Dg <- Matrix::tcrossprod(Matrix::kronecker(Matrix::diag(1,pX),Matrix::solve(lambdaG*.PenMatr(NumNodes,1, symmetric = symFusion, Tree = Tree) +
+                               Matrix::diag(lambda,NumNodes)))
+                      ,X)
+      XDXT        <- Matrix::crossprod(Matrix::t(X), Dg)
+      diagXDXTorg <- Matrix::diag(XDXT)
     } else {
       # evaluate subexpressions of the estimator
+      Dg <- as.matrix(Dg)
       Dg   <- diag(rep(lambda, ncol(X))) + lambdaG * Dg
     }
 
@@ -2652,7 +2795,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     lpPrev <- rep(0, length(Y))
     lp <- rep(0, length(Y))
     loglikPrev <- .loglikSurv(Y, lp) #penalty is zero for initial betas
-    Yev=Y[,2]
+    Yev <- Y[,2]
 
     for (iter in 1:maxIter){
       # calculate the weights
@@ -2671,21 +2814,21 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
         Z <- lp + (Yev - Ypred)/W0
 
         # now obtain the IRWLS update efficiently
-        diag(XDXT) <- diag(XDXT) + 1/W0
-        slh        <- qr.solve(XDXT, Z,
-                               tol=.Machine$double.eps)
-        gHat       <- solve(crossprod(U, qr.solve(XDXT, U,tol = .Machine$double.eps)),
-                            crossprod(U, slh))
-        slh        <- qr.solve(XDXT, Z - U %*% gHat,
-                               tol=.Machine$double.eps)
-        diag(XDXT) <- diagXDXTorg
-        lp         <-crossprod(XDXT, slh)
+        Matrix::diag(XDXT) <- Matrix::diag(XDXT) + 1/W0
+        slh        <- Matrix::solve(XDXT, Z)
+        gHat       <- Matrix::solve(Matrix::crossprod(U, Matrix::solve(XDXT, U)),
+                                    Matrix::crossprod(U, slh))
+        slh        <- Matrix::solve(XDXT, Z - U %*% gHat)
+        Matrix::diag(XDXT) <- diagXDXTorg
+        lp         <- Matrix::crossprod(XDXT, slh)
         penalty    <- sum(lp * slh) / 2
-        lp         <- lp + U %*% gHat
+        lp         <- as.numeric(lp) + as.numeric(U %*% gHat)
       }
+
       if (ncol(X) < nrow(X)){
         # adjusted response
         Z <- W0*lp + (Yev - Ypred)
+        X <- as.matrix(X)
 
         # evaluate subexpressions of the estimator
         XTXpD <-crossprod(sweep(X, 1, sqrt(W0), FUN="*"))
@@ -2744,7 +2887,7 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     }
 
     if (ncol(X) >= nrow(X)){
-      bHat <- as.numeric(tcrossprod(as.numeric(slh), Dg))
+      bHat <- as.numeric(Matrix::tcrossprod(as.numeric(slh), Dg))
     }
   }
   effects <- c(as.numeric(gHat), as.numeric(bHat))
@@ -2854,10 +2997,12 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 }
 
 .loglikSurv <- function(Y,lp){
-  #Author: Mark A. van de Wiel
+
+
   if (!inherits(Y, "Surv")) {
     stop("Survival Model, please specify Y as survival object")}
-  hazards <- .breslow(Y,lp);
+
+  hazards <- .breslow(Y,lp)
   di <- Y[,2]
   ht <- hazards[,1]
   Ht <- hazards[,2]

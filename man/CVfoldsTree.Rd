@@ -7,7 +7,7 @@
 CVfoldsTree(Y, Tree, Z, model = NULL, kfold = 5, nrepeat = 3)
 }
 \arguments{
-\item{Y}{The response variable. Should be:
+\item{Y}{The response variable. Should be one of:
 \itemize{
 \item Numeric (for linear regression),
 \item Binary (encoded as 0 and 1, for logistic regression),
