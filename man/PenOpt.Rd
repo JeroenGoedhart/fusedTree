@@ -21,9 +21,9 @@ PenOpt(
 )
 }
 \arguments{
-\item{Tree}{The fitted tree. Currently this should be a tree fitted using
-\code{rpart}. Trees fitted by other R packages (e.g., \code{partykit}) may
-be allowed in the future.}
+\item{Tree}{A fitted tree object, created using \pkg{rpart} or \pkg{partykit}.
+Must be an object of class \code{"rpart"} (from the \pkg{rpart} package) or
+\code{"constparty"} (from the \pkg{partykit} package).}
 
 \item{X}{The original omics data matrix. Has dimensions (sample size × number
 of omics variables). Should be a matrix.}

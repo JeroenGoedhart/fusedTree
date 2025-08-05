@@ -10,9 +10,9 @@
 #' to set-up the right data format. It is just meant for users to check what
 #' is going on.
 #'
-#' @param Tree A fitted tree object, created using \code{rpart}. Support for
-#'   trees fitted with other packages (e.g., \code{partykit}) may be added in
-#'   the future.
+#' @param Tree A fitted tree object, created using \pkg{rpart} or \pkg{partykit}.
+#'   Must be an object of class \code{"rpart"} (from the \pkg{rpart} package) or
+#'   \code{"constparty"} (from the \pkg{partykit} package).
 #' @param X A numeric omics data matrix with dimensions
 #'   (sample size × number of omics variables). Must be a \code{matrix}.
 #' @param Z A \code{data.frame} of clinical covariates used in tree fitting.
@@ -68,8 +68,8 @@
 Dat_Tree <- function(Tree, X, Z, LinVars = TRUE) {
 
   ## control statements ##
-  if (!inherits(Tree, "rpart")) {
-    stop("Tree is not an rpart object")}
+  if (!(inherits(Tree, "rpart") || inherits(Tree, "constparty"))) {
+    stop("Tree must be an rpart (from rpart package) or constparty (from partykit package) object")}
 
   if (is.null(X) | is.null(Z)) {
     stop("Either X, or Z is unspecified")}
@@ -90,41 +90,46 @@ Dat_Tree <- function(Tree, X, Z, LinVars = TRUE) {
     stop("'LinVars' is not logical, specify as either TRUE or FALSE")}
 
 
-  nodes <-  row.names(Tree$frame)[treeClust::rpart.predict.leaves(Tree, Z)]
-  nodes <- as.numeric(nodes)
-  Nodenames = base::paste0("N",sort(unique(as.numeric(row.names(Tree$frame)[Tree$where]))))
+  if (inherits(Tree, "rpart")) {
+    nodes <- row.names(Tree$frame)[treeClust::rpart.predict.leaves(Tree, Z)]
+    nodes <- as.numeric(nodes)
+    NodeInds <- base::sort(base::unique(as.numeric(row.names(Tree$frame)[Tree$where])))
+  } else if (inherits(Tree, "constparty")) {
+    nodes <- partykit::predict.party(Tree, type = "node")
+    NodeInds <- base::sort(base::unique(nodes))
+  }
 
-  p = ncol(X)
+  Nodenames <- base::paste0("N", NodeInds)
+
+  p <- ncol(X)
   if (is.null(colnames(X))) {
-    colnames(X) = base::paste0("x",seq(1,ncol(X)))}
+    colnames(X) <- base::paste0("x",seq(1,ncol(X)))}
 
   if (is.null(colnames(Z))) {
-    colnames(Z) = base::paste0("z",seq(1,ncol(Z)))}
+    colnames(Z) <- base::paste0("z",seq(1,ncol(Z)))}
 
-  namesZ = colnames(Z)
-  namesX = colnames(X)
+  namesZ <- colnames(Z)
+  namesX <- colnames(X)
 
+  NumNodes <- length(NodeInds)
 
-
-  NumNodes <- length(unique(Tree$where))
   if (NumNodes < 2){
     message("Tree has single node, return design matrices")
     return(list(Clinical = stats::model.matrix(~., Z), Omics = X))
   } else {
 
-    NodeInds <- sort(unique(as.numeric(row.names(Tree$frame)[Tree$where])))
     ClinIntercepts = stats::model.matrix(~ 0 + factor(nodes, levels = NodeInds))
 
     X_tot <- Matrix::t(Matrix::KhatriRao(t(X), t(ClinIntercepts)))
     colnames(X_tot) <- c(sapply(namesX, function (x) base::paste0(x,base::paste0("_" ,Nodenames))))
-    colnames(ClinIntercepts) = Nodenames
+    colnames(ClinIntercepts) <- Nodenames
     if (ncol(X) < nrow(X)) {
       X_tot <- as.matrix(X_tot)
     }
 
     if (isTRUE(LinVars)){
       idVars <- which(sapply(Z, is.numeric) & apply(Z, 2, function (x) length(unique(x)) > 2))
-      nameZ = colnames(Z)[idVars]
+      nameZ <- colnames(Z)[idVars]
       Clinical <- as.matrix(cbind(ClinIntercepts, Z[,idVars]))
       colnames(Clinical)[- (1 : NumNodes)] <- nameZ
     } else {
@@ -154,9 +159,9 @@ Dat_Tree <- function(Tree, X, Z, LinVars = TRUE) {
 #'     \item A survival object created using \code{Surv()} (for Cox regression).
 #'   }
 #'   Only right-censored survival data is currently supported.
-#' @param Tree A fitted decision tree, typically created using \code{rpart}.
-#'   Trees fitted with other packages (e.g., \code{partykit}) may be supported
-#'   in future versions.
+#' @param Tree A fitted tree object, created using \pkg{rpart} or \pkg{partykit}.
+#'   Must be an object of class \code{"rpart"} (from the \pkg{rpart} package) or
+#'   \code{"constparty"} (from the \pkg{partykit} package).
 #' @param Z A \code{data.frame} of clinical variables used to fit the tree.
 #'   This is used to determine node membership for balancing folds.
 #' @param model Character. Specifies the type of outcome model. Must be one of:
@@ -209,8 +214,8 @@ CVfoldsTree <- function(Y, Tree, Z, model = NULL, kfold = 5, nrepeat = 3) {
   #nrepeat: number of repeats of the CV
   #Output: list object with kfold elements containing the sample indices of the left-out samples per fold
 
-  if (!inherits(Tree, "rpart")) {
-    stop("Tree is not an rpart object")
+  if (!(inherits(Tree, "rpart") || inherits(Tree, "constparty"))) {
+    stop("Tree must be an rpart (from rpart package) or constparty (from partykit package) object")
   }
 
   if (!(model %in% c("linear", "logistic", "cox"))) {
@@ -268,8 +273,15 @@ CVfoldsTree <- function(Y, Tree, Z, model = NULL, kfold = 5, nrepeat = 3) {
     stop("nrepeat should be a single positive integer")
   }
 
-  Nodes <-  row.names(Tree$frame)[treeClust::rpart.predict.leaves(Tree,Z)]
+  ## Get node assignments
+  if (inherits(Tree, "rpart")) {
+    Nodes <- row.names(Tree$frame)[treeClust::rpart.predict.leaves(Tree, Z)]
+  } else if (inherits(Tree, "constparty")) {
+    Nodes <- partykit::predict.party(Tree, newdata = Z, type = "node")
+  }
   Nodes <- factor(Nodes)
+
+
   if (model == "logistic"){
     StratDat <- cbind.data.frame(Resp = factor(Y), Node = Nodes)
     Strat <- splitTools::multi_strata(StratDat, strategy = "interaction")
@@ -299,9 +311,9 @@ CVfoldsTree <- function(Y, Tree, Z, model = NULL, kfold = 5, nrepeat = 3) {
 #' Note that \code{Dat_Tree()} is called internally so please provide the
 #' original data as input arguments.
 #'
-#' @param Tree The fitted tree. Currently this should be a tree fitted using
-#'   \code{rpart}. Trees fitted by other R packages (e.g., \code{partykit}) may
-#'   be allowed in the future.
+#' @param Tree A fitted tree object, created using \pkg{rpart} or \pkg{partykit}.
+#'   Must be an object of class \code{"rpart"} (from the \pkg{rpart} package) or
+#'   \code{"constparty"} (from the \pkg{partykit} package).
 #' @param X The original omics data matrix. Has dimensions (sample size × number
 #'   of omics variables). Should be a matrix.
 #' @param Z The original clinical data matrix, which was used to fit the tree.
@@ -400,8 +412,8 @@ PenOpt <- function(Tree, X, Y, Z, model = NULL,
                    LinVars = FALSE) {
 
   ## control statements ##
-  if (!inherits(Tree, "rpart")) {
-    stop("Tree is not an rpart object")
+  if (!(inherits(Tree, "rpart") || inherits(Tree, "constparty"))) {
+    stop("Tree must be an rpart (from rpart package) or constparty (from partykit package) object")
   }
 
   if (!(model %in% c("linear", "logistic", "cox"))) {
@@ -517,10 +529,11 @@ PenOpt <- function(Tree, X, Y, Z, model = NULL,
 
 
   ## obtaining tree stats
-
-  nodes <-  row.names(Tree$frame)[treeClust::rpart.predict.leaves(Tree,Z)]
-  nodes <- as.numeric(nodes)
-  names = base::paste0("N",sort(unique(nodes)))
+  if (inherits(Tree, "rpart")) {
+    nodes <- treeClust::rpart.predict.leaves(Tree, Z)
+  } else if (inherits(Tree, "constparty")) {
+    nodes <- partykit::predict.party(Tree, newdata = Z, type = "node")
+  }
 
   NumNodes <- length(unique(nodes))
 
@@ -539,7 +552,7 @@ PenOpt <- function(Tree, X, Y, Z, model = NULL,
 
     remove(Dat)
 
-    NumNod = ncol(X1) / ncol(X)
+    NumNod <- ncol(X1) / ncol(X)
 
     if (alphaInit == 0){
       Delta <- NULL
@@ -581,9 +594,9 @@ PenOpt <- function(Tree, X, Y, Z, model = NULL,
 #' between leaf node-specific omics effects. The fusion penalty can also be
 #' omitted by specifying `alpha = 0`.
 #'
-#' @param Tree The fitted tree object. Should be created using \code{rpart}.
-#'   Support for other tree-fitting packages (e.g., \code{partykit}) may be
-#'   added in the future.
+#' @param Tree A fitted tree object, created using \pkg{rpart} or \pkg{partykit}.
+#'   Must be an object of class \code{"rpart"} (from the \pkg{rpart} package) or
+#'   \code{"constparty"} (from the \pkg{partykit} package).
 #' @param X A matrix of omics data with dimensions (sample size × number of omics variables).
 #' @param Z A data frame of clinical covariates used to fit the tree. Must be a
 #'   \code{data.frame}, not a matrix.
@@ -705,8 +718,9 @@ fusedTree <- function(Tree, X, Y, Z, LinVars = TRUE, model,
                       dat = FALSE, verbose = TRUE) {
 
   ## control statements ##
-  if (!inherits(Tree, "rpart")) {
-    stop("Tree is not an rpart object")}
+  if (!(inherits(Tree, "rpart") || inherits(Tree, "constparty"))) {
+    stop("Tree must be an rpart (from rpart package) or constparty (from partykit package) object")
+  }
 
   if (!(model %in% c("linear", "logistic", "cox"))) {
     stop("Model should be specified as linear, logistic, or cox")
@@ -793,9 +807,13 @@ fusedTree <- function(Tree, X, Y, Z, LinVars = TRUE, model,
   }
 
 
-  nodes <-  row.names(Tree$frame)[treeClust::rpart.predict.leaves(Tree,Z)]
-  nodes <- as.numeric(nodes)
-  names = base::paste0("N",sort(unique(nodes)))
+  ## obtaining tree stats
+  ## obtaining tree stats
+  if (inherits(Tree, "rpart")) {
+    nodes <- treeClust::rpart.predict.leaves(Tree, Z)
+  } else if (inherits(Tree, "constparty")) {
+    nodes <- partykit::predict.party(Tree, newdata = Z, type = "node")
+  }
 
   NumNodes <- length(unique(nodes))
 
@@ -812,7 +830,7 @@ fusedTree <- function(Tree, X, Y, Z, LinVars = TRUE, model,
 
     X1 <- Dat$Omics; U1 <- Dat$Clinical
     remove(Dat)
-    NumNod = ncol(X1)/ncol(X)
+    NumNod <- ncol(X1)/ncol(X)
 
     if (alpha == 0){
       Delta <- NULL
@@ -951,7 +969,6 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     if (length(unique(newY)) < 3) {
       stop("Linear model, but newY has maximally 2 distinct values")
     }
-
     Ypred <- LP
     return(data.frame(Resp = newY, Ypred = Ypred))
 
@@ -959,7 +976,6 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     if (!all(newY == 1 | newY == 0)) {
       stop("Logistic model, specify newY as numeric coded with 0 and 1")
     }
-
     Ypred <- 1 / (1 + exp(-LP))
     return(data.frame(Resp = newY, Ypred = Ypred, LinPred = LP))
 
@@ -997,7 +1013,6 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     stop("Unsupported model type: ", model)
   }
 }
-
 
 ###############################################################################
 ################################### Auxiliary Functions #######################
@@ -1045,24 +1060,33 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
 .compute_weight_matrix <- function(Tree) {
   # Extract predicted values for each terminal node
+  if (!(inherits(Tree, "rpart") || inherits(Tree, "constparty"))) {
+    stop("Tree must be an rpart (from rpart package) or constparty (from partykit package) object")}
 
-  if (!inherits(Tree, "rpart")) {
-    stop("Tree is not an rpart object")}
 
-  method <- Tree$method
 
-  # regression
-  if (method == "anova") {
-    terminal_preds <- Tree$frame$yval[Tree$frame$var == "<leaf>"]
+  if (inherits(Tree, "rpart")) {
+    method <- Tree$method
 
-  } else if (method == "class") {
-    terminal_preds <- Tree$frame$yval2[,7][Tree$frame$var == "<leaf>"]
+    # regression and survival
+    if (method %in% c("anova", "poisson", "exp")) {
+      terminal_preds <- Tree$frame$yval[Tree$frame$var == "<leaf>"]
 
-  } else if (method %in% c("poisson", "exp")) {
-    terminal_preds <- Tree$frame$yval[Tree$frame$var == "<leaf>"]
+    } else if (method == "class") {
+      res <- Tree$frame$yval2
+      terminal_preds <- res[Tree$frame$var == "<leaf>", ncol(res) - 1]
+    } else {
+      stop("Unsupported rpart method: ", method)
+    }
 
-  } else {
-    stop("Unsupported rpart method: ", method)
+  } else if (inherits(Tree, "constparty")) {
+    terminal_nodes <- partykit::nodeids(Tree, terminal = TRUE)
+    terminal_preds <- partykit::predict_party(Tree, terminal_nodes, type = "response")
+
+    # distinguish for classification case
+    if (is.factor(terminal_preds)) {
+      terminal_preds <- partykit::predict_party(Tree, terminal_nodes, type = "prob")[,2]
+    }
   }
 
   M <- base::length(terminal_preds)
@@ -1087,13 +1111,13 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
   base::diag(rank_diff) <- 0
   w_matrix <- 1 / (1 + rank_diff)
+  print(w_matrix)
 
   # Normalize
   w_matrix <- w_matrix/base::rowSums(w_matrix)
 
   return(w_matrix)
 }
-
 
 .is_single_positive_integer <- function(x) {
   is.numeric(x) && length(x) == 1 && x == as.integer(x) && x > 0

@@ -7,9 +7,9 @@
 Dat_Tree(Tree, X, Z, LinVars = TRUE)
 }
 \arguments{
-\item{Tree}{A fitted tree object, created using \code{rpart}. Support for
-trees fitted with other packages (e.g., \code{partykit}) may be added in
-the future.}
+\item{Tree}{A fitted tree object, created using \pkg{rpart} or \pkg{partykit}.
+Must be an object of class \code{"rpart"} (from the \pkg{rpart} package) or
+\code{"constparty"} (from the \pkg{partykit} package).}
 
 \item{X}{A numeric omics data matrix with dimensions
 (sample size × number of omics variables). Must be a \code{matrix}.}

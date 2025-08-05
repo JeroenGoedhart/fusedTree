@@ -28,7 +28,9 @@ knitr::opts_chunk$set(
   - unpenalized leaf-node-specific intercepts to account for the established
   signal in the clinical variables
 
-**Note:** Tree construction must be done externally (e.g., with the [`rpart`](https://cran.r-project.org/package=rpart) package in R).
+**Note:** Tree construction must be done externally (e.g., with the [`rpart`](https://cran.r-project.org/package=rpart) or
+[`partykit`](https://cran.r-project.org/package=partykit)
+packages in R).
 
 For full methodological details, see the [preprint](https://arxiv.org/abs/2411.02396).
 
@@ -100,6 +102,11 @@ Treefit <- prune(rp, cp = cp)
 
 plot(Treefit, main = "Clinical-variable Tree")
 text(Treefit, use.n = TRUE)
+
+## the software also accepts tree fits from the `partykit` package:
+if (!requireNamespace("partykit", quietly = TRUE)) install.packages("partykit")
+library(partykit)
+Treefit1 <- as.party(Treefit)
 ```
 
 ### 3. (Optional) Understanding the Design Matrices

@@ -18,7 +18,9 @@ in handling complex data structures.
     established signal in the clinical variables
 
 **Note:** Tree construction must be done externally (e.g., with the
-[`rpart`](https://cran.r-project.org/package=rpart) package in R).
+[`rpart`](https://cran.r-project.org/package=rpart) or
+[`partykit`](https://cran.r-project.org/package=partykit) packages in
+R).
 
 For full methodological details, see the
 [preprint](https://arxiv.org/abs/2411.02396).
@@ -97,6 +99,17 @@ text(Treefit, use.n = TRUE)
 ```
 
 <img src="man/figures/README-fit-tree-1.png" width="100%" />
+
+``` r
+
+## the software also accepts tree fits from the `partykit` package:
+if (!requireNamespace("partykit", quietly = TRUE)) install.packages("partykit")
+library(partykit)
+#> Loading required package: grid
+#> Loading required package: libcoin
+#> Loading required package: mvtnorm
+Treefit1 <- as.party(Treefit)
+```
 
 ### 3. (Optional) Understanding the Design Matrices
 

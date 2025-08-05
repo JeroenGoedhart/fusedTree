@@ -27,6 +27,7 @@ Imports:
     Matrix,
     splitTools,
     survival,
-    treeClust
+    treeClust,
+    partykit
 Suggests: 
     rpart
