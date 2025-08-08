@@ -1,7 +1,5 @@
 # fusedTree 1.1.0
 
-# fusedTree 1.1.1
-
 ## New features
 
 * Tree fits are now also accepted from  from the `partykit` package

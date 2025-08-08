@@ -9,7 +9,7 @@ in handling complex data structures.
 - The tree is built using **clinical variables only**.
 - The linear regression models within each leaf node use **omics
   variables only**.
-- Leaf‑node‑specific regression models are estimated via penalized
+- Leaf‑node‑specific regression models are estimated via a penalized
   likelihood, combining:
   - A standard **ridge (L2) penalty**
   - A **fusion penalty**, linking the regression models across leaf
@@ -30,7 +30,7 @@ For full methodological details, see the
 ## Installation
 
 ``` r
-# CRAN (when available)
+# CRAN
 install.packages("fusedTree")
 
 # Development version from GitHub
@@ -104,6 +104,7 @@ text(Treefit, use.n = TRUE)
 
 ## the software also accepts tree fits from the `partykit` package:
 if (!requireNamespace("partykit", quietly = TRUE)) install.packages("partykit")
+if (!requireNamespace("coin", quietly = TRUE)) install.packages("coin") # also needs to be installed
 library(partykit)
 #> Loading required package: grid
 #> Loading required package: libcoin
@@ -116,7 +117,7 @@ Treefit1 <- as.party(Treefit)
 Before fitting the model, it’s useful to understand how **fusedTree**
 internally represents the data to enable leaf-specific regression. Each
 **leaf node** of the tree gets its own (generalized) linear regression
-model. To support this, two large design matrices are constructed:
+model. To support this, two design matrices are constructed:
 
 - **Clinical design matrix** (`Clinical`):  
   A binary intercept indicator matrix of size `N × (# of leaf nodes)`.
@@ -127,7 +128,9 @@ model. To support this, two large design matrices are constructed:
   A matrix of size `N × (p × # of leaf nodes)` where `p` is the number
   of omics variables. For each leaf node, the corresponding block of
   columns contains the omics values **only for the observations in that
-  node**; entries are 0 elsewhere.
+  node**; entries are 0 elsewhere. When `p > N` (high-dimensional data),
+  the returned matrix is build using the \[`Matrix`\] package for memory
+  efficiency. The matrix is therefore of class `dgCMatrix`.
 
 These matrices are created automatically during model fitting, but you
 can inspect them yourself using the `Dat_Tree()` function:
@@ -343,7 +346,8 @@ fit_bin$Effects
 #>  1.2347340 -1.2410471 -1.2507165 -1.2090639
 ```
 
-Finally, we simulate test data and evaluate classification performance:
+Finally, we simulate test data and evaluate the classification
+performance:
 
 ``` r
 # Simulate test data
@@ -374,9 +378,231 @@ auc_result
 #> Area under the curve: 0.9328
 ```
 
-This example demonstrates how to apply `fusedTree` to binary
-classification problems using logistic regression and prediction based
-on the estimated fused model.
+## Example 3: Survival Outcome
+
+We demonstrate how to apply `fusedTree` to time-to-event data using a
+Cox model. The tree is constructed using the
+[`partykit`](https://cran.r-project.org/package=partykit) package
+
+``` r
+library(fusedTree)
+library(partykit)
+if (!requireNamespace("survival", quietly = TRUE)) install.packages("survival")
+library(survival)
+
+# Simulation settings
+set.seed(14)
+N       <- 300
+p       <- 5
+p_Clin  <- 5
+betas   <- c(1, -1, 3, 2, -2)
+
+# Covariates
+Z <- as.data.frame(matrix(runif(N * p_Clin), nrow = N))  # clinical
+X <- matrix(rnorm(N * p), nrow = N)                      # omics
+
+# True hazard via linear predictor
+linpred <- 1 * (Z[,1] - 0.5)^2 +
+           3 * sin(Z[,1] * Z[,2]) +
+           2 * Z[,3] +
+           X %*% betas
+hazard <- exp(linpred)
+
+# Simulate survival times using exponential distribution
+time <- rexp(N, rate = hazard)
+censoring <- rexp(N, rate = 0.1)
+status <- as.numeric(time <= censoring)
+time <- pmin(time, censoring)
+
+# Create survival object
+Y_surv <- Surv(time, status)
+
+# Fit tree on clinical variables using partykit
+dat <- data.frame(time = time, status = status, Z)
+set.seed(4)
+Treefit <- ctree(Surv(time, status) ~ ., data = dat)
+plot(Treefit)
+```
+
+<img src="man/figures/README-survial-data-1.png" width="100%" />
+
+The tree splits on the variables 2 and 3 and has 3 leaf nodes.
+
+``` r
+# Cross-validation folds
+set.seed(15)
+folds <- CVfoldsTree(Y = Y_surv, Tree = Treefit, Z = Z,
+                     model = "cox", nrepeat = 1)
+
+# Tune penalties
+optPenalties <- PenOpt(Tree = Treefit, X = X, Y = Y_surv, Z = Z,
+                       model = "cox", lambdaInit = 10, alphaInit = 10,
+                       loss = "loglik", LinVars = TRUE,
+                       folds = folds, multistart = FALSE)
+#> Tuning fusedTree with fusion penalty
+optPenalties
+#>       lambda        alpha 
+#>    0.2230932 2845.6862257
+```
+
+Note that we now included **continuous** variables linearly in the model
+(see clinical design matrix). We only do so for continuous variables and
+not for ordinal/categorical variables. The reason is that trees can have
+a hard time finding linear effects.
+
+``` r
+# Fit fusedTree
+fit_surv <- fusedTree(Tree = Treefit, X = X, Y = Y_surv, Z = Z,
+                      LinVars = TRUE, model = "cox",
+                      lambda = optPenalties[1],
+                      alpha = optPenalties[2],
+                      verbose = TRUE, maxIter = 100)
+#> Fit fusedTree with fusion penalty
+#> Iteration  1   log likelihood equals:  -1152.909
+#> Iteration  2   log likelihood equals:  -1102.971
+#> Iteration  3   log likelihood equals:  -1081.002
+#> Iteration  4   log likelihood equals:  -1068.760
+#> Iteration  5   log likelihood equals:  -1061.176
+#> Iteration  6   log likelihood equals:  -1056.175
+#> Iteration  7   log likelihood equals:  -1052.739
+#> Iteration  8   log likelihood equals:  -1050.309
+#> Iteration  9   log likelihood equals:  -1048.552
+#> Iteration 10   log likelihood equals:  -1047.261
+#> Iteration 11   log likelihood equals:  -1046.300
+#> Iteration 12   log likelihood equals:  -1045.576
+#> Iteration 13   log likelihood equals:  -1045.026
+#> Iteration 14   log likelihood equals:  -1044.606
+#> Iteration 15   log likelihood equals:  -1044.282
+#> Iteration 16   log likelihood equals:  -1044.032
+#> Iteration 17   log likelihood equals:  -1043.837
+#> Iteration 18   log likelihood equals:  -1043.686
+#> Iteration 19   log likelihood equals:  -1043.567
+#> Iteration 20   log likelihood equals:  -1043.474
+#> Iteration 21   log likelihood equals:  -1043.400
+#> Iteration 22   log likelihood equals:  -1043.343
+#> Iteration 23   log likelihood equals:  -1043.297
+#> Iteration 24   log likelihood equals:  -1043.261
+#> Iteration 25   log likelihood equals:  -1043.232
+#> Iteration 26   log likelihood equals:  -1043.210
+#> Iteration 27   log likelihood equals:  -1043.192
+#> Iteration 28   log likelihood equals:  -1043.177
+#> Iteration 29   log likelihood equals:  -1043.166
+#> Iteration 30   log likelihood equals:  -1043.157
+#> Iteration 31   log likelihood equals:  -1043.149
+#> Iteration 32   log likelihood equals:  -1043.144
+#> Iteration 33   log likelihood equals:  -1043.139
+#> Iteration 34   log likelihood equals:  -1043.135
+#> Iteration 35   log likelihood equals:  -1043.132
+#> Iteration 36   log likelihood equals:  -1043.130
+#> Iteration 37   log likelihood equals:  -1043.128
+#> Iteration 38   log likelihood equals:  -1043.127
+#> Iteration 39   log likelihood equals:  -1043.125
+#> Iteration 40   log likelihood equals:  -1043.125
+#> Iteration 41   log likelihood equals:  -1043.124
+#> Iteration 42   log likelihood equals:  -1043.123
+#> Iteration 43   log likelihood equals:  -1043.123
+#> Iteration 44   log likelihood equals:  -1043.122
+#> Iteration 45   log likelihood equals:  -1043.122
+#> Iteration 46   log likelihood equals:  -1043.122
+#> Iteration 47   log likelihood equals:  -1043.121
+#> Iteration 48   log likelihood equals:  -1043.121
+#> Iteration 49   log likelihood equals:  -1043.121
+#> Iteration 50   log likelihood equals:  -1043.121
+#> Iteration 51   log likelihood equals:  -1043.121
+#> Iteration 52   log likelihood equals:  -1043.121
+#> Iteration 53   log likelihood equals:  -1043.121
+#> Iteration 54   log likelihood equals:  -1043.121
+#> Iteration 55   log likelihood equals:  -1043.121
+#> Iteration 56   log likelihood equals:  -1043.121
+#> Iteration 57   log likelihood equals:  -1043.121
+#> Iteration 58   log likelihood equals:  -1043.121
+#> Iteration 59   log likelihood equals:  -1043.121
+#> Iteration 60   log likelihood equals:  -1043.121
+#> Iteration 61   log likelihood equals:  -1043.121
+#> Iteration 62   log likelihood equals:  -1043.121
+#> Iteration 63   log likelihood equals:  -1043.121
+#> Iteration 64   log likelihood equals:  -1043.121
+#> Iteration 65   log likelihood equals:  -1043.121
+#> Iteration 66   log likelihood equals:  -1043.121
+#> Iteration 67   log likelihood equals:  -1043.121
+#> Iteration 68   log likelihood equals:  -1043.121
+#> Iteration 69   log likelihood equals:  -1043.121
+#> Iteration 70   log likelihood equals:  -1043.121
+#> Iteration 71   log likelihood equals:  -1043.121
+#> Iteration 72   log likelihood equals:  -1043.121
+#> Iteration 73   log likelihood equals:  -1043.121
+#> Iteration 74   log likelihood equals:  -1043.121
+#> Iteration 75   log likelihood equals:  -1043.121
+#> Iteration 76   log likelihood equals:  -1043.121
+#> Iteration 77   log likelihood equals:  -1043.121
+#> Iteration 78   log likelihood equals:  -1043.121
+#> Iteration 79   log likelihood equals:  -1043.121
+#> Iteration 80   log likelihood equals:  -1043.121
+#> Iteration 81   log likelihood equals:  -1043.121
+#> Iteration 82   log likelihood equals:  -1043.121
+#> IRLS converged at iteration  82
+# effect size estimates
+fit_surv$Effects
+#>          N3          N4          N5          V1          V2          V3 
+#> -1.71655000 -1.25401359 -1.33805777  1.93671122  0.94286785  1.49490466 
+#>          V4          V5       x1_N3       x1_N4       x1_N5       x2_N3 
+#>  0.09727774  0.02108388  0.89034992  0.88613462  0.89072431 -1.03628669 
+#>       x2_N4       x2_N5       x3_N3       x3_N4       x3_N5       x4_N3 
+#> -1.03459334 -1.03548468  2.87728535  2.87089858  2.87371693  1.88795916 
+#>       x4_N4       x4_N5       x5_N3       x5_N4       x5_N5 
+#>  1.88787855  1.88628444 -2.00072538 -2.00353651 -1.99967049
+
+# Breslow estimates of baseline (cumulative) hazard
+Breslow <- fit_surv$Breslow
+```
+
+The fit now also contains the Breslow estimates of the baseline hazard
+and cumulative baseline hazard.
+
+Next, we compute the out-of-sample using the standard concordance index
+(C-index)
+
+``` r
+
+# Simulate test data
+N_test <- 100
+Z_test <- as.data.frame(matrix(runif(N_test * p_Clin), nrow = N_test))
+X_test <- matrix(rnorm(N_test * p), nrow = N_test)
+
+linpred_test <- 1 * (Z_test[,1] - 0.5) ^ 2 +
+                3 * sin(Z_test[,1] * Z_test[,2]) +
+                2 * Z_test[,3] +
+                X_test %*% betas
+hazard_test <- exp(linpred_test)
+time_test <- rexp(N_test, rate = hazard_test)
+censor_test <- rexp(N_test, rate = 0.1)
+status_test <- as.numeric(time_test <= censor_test)
+time_test <- pmin(time_test, censor_test)
+
+Y_test <- Surv(time_test, status_test)
+
+# Predict
+Preds <- predict(fit_surv, newX = X_test, newY = Y_test, newZ = Z_test)
+
+# The prediction now contain the linear predictor
+LinPred <- Preds$LinPred$LinPred
+
+# and the estimated survival probabilities for each subject (rows) per unique
+# time interval of the test set (columns).
+Survival <- Preds$Survival
+
+# We then compute the C-index by:
+LP <- -LinPred # required for concordance
+survival::concordance(Y_test ~ LP)$concordance
+#> [1] 0.9151928
+
+# and the time-dependent AUC by:
+if (!requireNamespace("survivalROC", quietly = TRUE)) install.packages("survivalROC")
+library(survivalROC)
+survivalROC::survivalROC.C(Stime = Y_test[,1], status = Y_test[,2],
+                           marker = LinPred, predict.time = median(Y_test[,1]))$AUC
+#> [1] 0.971439
+```
 
 ## Summary
 

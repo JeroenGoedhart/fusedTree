@@ -22,7 +22,7 @@ knitr::opts_chunk$set(
 
 - The tree is built using **clinical variables only**.
 - The linear regression models within each leaf node use **omics variables only**.
-- Leaf‑node‑specific regression models are estimated via penalized likelihood, combining:
+- Leaf‑node‑specific regression models are estimated via a penalized likelihood, combining:
   - A standard **ridge (L2) penalty**
   - A **fusion penalty**, linking the regression models across leaf nodes
   - unpenalized leaf-node-specific intercepts to account for the established
@@ -39,7 +39,7 @@ For full methodological details, see the [preprint](https://arxiv.org/abs/2411.0
 ## Installation
   
 ```{r installation, eval = FALSE}
-# CRAN (when available)
+# CRAN
 install.packages("fusedTree")
 
 # Development version from GitHub
@@ -105,6 +105,7 @@ text(Treefit, use.n = TRUE)
 
 ## the software also accepts tree fits from the `partykit` package:
 if (!requireNamespace("partykit", quietly = TRUE)) install.packages("partykit")
+if (!requireNamespace("coin", quietly = TRUE)) install.packages("coin") # also needs to be installed
 library(partykit)
 Treefit1 <- as.party(Treefit)
 ```
@@ -112,13 +113,13 @@ Treefit1 <- as.party(Treefit)
 ### 3. (Optional) Understanding the Design Matrices
 
 Before fitting the model, it's useful to understand how **fusedTree** internally represents the data to enable leaf-specific regression. 
-Each **leaf node** of the tree gets its own (generalized) linear regression model. To support this, two large design matrices are constructed: 
+Each **leaf node** of the tree gets its own (generalized) linear regression model. To support this, two design matrices are constructed: 
 
 - **Clinical design matrix** (`Clinical`):  
   A binary intercept indicator matrix of size `N × (# of leaf nodes)`. Each column corresponds to a leaf node, with entries equal to 1 if an observation falls into that node and 0 otherwise.
 
 - **Omics design matrix** (`Omics`):  
-  A matrix of size `N × (p × # of leaf nodes)` where `p` is the number of omics variables. For each leaf node, the corresponding block of columns contains the omics values **only for the observations in that node**; entries are 0 elsewhere.
+  A matrix of size `N × (p × # of leaf nodes)` where `p` is the number of omics variables. For each leaf node, the corresponding block of columns contains the omics values **only for the observations in that node**; entries are 0 elsewhere. When `p > N` (high-dimensional data), the returned matrix is build using the [`Matrix`] package for memory efficiency. The matrix is therefore of class `dgCMatrix`.
 
 These matrices are created automatically during model fitting, but you can inspect them yourself using the `Dat_Tree()` function:
 
@@ -265,7 +266,7 @@ fit_bin <- fusedTree(Tree = Treefit, X = X, Y = Y, Z = Z,
 fit_bin$Effects
 ```
 
-Finally, we simulate test data and evaluate classification performance:
+Finally, we simulate test data and evaluate the classification performance:
 
 ```{r binary-predict}
 # Simulate test data
@@ -288,7 +289,131 @@ auc_result
 ```
 
 
-This example demonstrates how to apply `fusedTree` to binary classification problems using logistic regression and prediction based on the estimated fused model.
+## Example 3: Survival Outcome
+
+We demonstrate how to apply `fusedTree` to time-to-event data using a Cox model. The tree is constructed using the [`partykit`](https://cran.r-project.org/package=partykit) package 
+
+```{r survial-data}
+library(fusedTree)
+library(partykit)
+if (!requireNamespace("survival", quietly = TRUE)) install.packages("survival")
+library(survival)
+
+# Simulation settings
+set.seed(14)
+N       <- 300
+p       <- 5
+p_Clin  <- 5
+betas   <- c(1, -1, 3, 2, -2)
+
+# Covariates
+Z <- as.data.frame(matrix(runif(N * p_Clin), nrow = N))  # clinical
+X <- matrix(rnorm(N * p), nrow = N)                      # omics
+
+# True hazard via linear predictor
+linpred <- 1 * (Z[,1] - 0.5)^2 +
+           3 * sin(Z[,1] * Z[,2]) +
+           2 * Z[,3] +
+           X %*% betas
+hazard <- exp(linpred)
+
+# Simulate survival times using exponential distribution
+time <- rexp(N, rate = hazard)
+censoring <- rexp(N, rate = 0.1)
+status <- as.numeric(time <= censoring)
+time <- pmin(time, censoring)
+
+# Create survival object
+Y_surv <- Surv(time, status)
+
+# Fit tree on clinical variables using partykit
+dat <- data.frame(time = time, status = status, Z)
+set.seed(4)
+Treefit <- ctree(Surv(time, status) ~ ., data = dat)
+plot(Treefit)
+
+```
+
+The tree splits on the variables 2 and 3 and has 3 leaf nodes.
+
+```{r survial-tuning}
+# Cross-validation folds
+set.seed(15)
+folds <- CVfoldsTree(Y = Y_surv, Tree = Treefit, Z = Z,
+                     model = "cox", nrepeat = 1)
+
+# Tune penalties
+optPenalties <- PenOpt(Tree = Treefit, X = X, Y = Y_surv, Z = Z,
+                       model = "cox", lambdaInit = 10, alphaInit = 10,
+                       loss = "loglik", LinVars = TRUE,
+                       folds = folds, multistart = FALSE)
+optPenalties
+```
+
+Note that we now included **continuous** variables
+linearly in the model (see clinical design matrix). We only do so for continuous
+variables and not for ordinal/categorical variables. The reason is that trees
+can have a hard time finding linear effects.
+
+```{r survial-fitting}
+# Fit fusedTree
+fit_surv <- fusedTree(Tree = Treefit, X = X, Y = Y_surv, Z = Z,
+                      LinVars = TRUE, model = "cox",
+                      lambda = optPenalties[1],
+                      alpha = optPenalties[2],
+                      verbose = TRUE, maxIter = 100)
+# effect size estimates
+fit_surv$Effects
+
+# Breslow estimates of baseline (cumulative) hazard
+Breslow <- fit_surv$Breslow
+```
+
+The fit now also contains the Breslow estimates of the baseline hazard and
+cumulative baseline hazard.
+
+Next, we compute the out-of-sample using the standard concordance index (C-index)
+
+```{r survial-predicting}
+
+# Simulate test data
+N_test <- 100
+Z_test <- as.data.frame(matrix(runif(N_test * p_Clin), nrow = N_test))
+X_test <- matrix(rnorm(N_test * p), nrow = N_test)
+
+linpred_test <- 1 * (Z_test[,1] - 0.5) ^ 2 +
+                3 * sin(Z_test[,1] * Z_test[,2]) +
+                2 * Z_test[,3] +
+                X_test %*% betas
+hazard_test <- exp(linpred_test)
+time_test <- rexp(N_test, rate = hazard_test)
+censor_test <- rexp(N_test, rate = 0.1)
+status_test <- as.numeric(time_test <= censor_test)
+time_test <- pmin(time_test, censor_test)
+
+Y_test <- Surv(time_test, status_test)
+
+# Predict
+Preds <- predict(fit_surv, newX = X_test, newY = Y_test, newZ = Z_test)
+
+# The prediction now contain the linear predictor
+LinPred <- Preds$LinPred$LinPred
+
+# and the estimated survival probabilities for each subject (rows) per unique
+# time interval of the test set (columns).
+Survival <- Preds$Survival
+
+# We then compute the C-index by:
+LP <- -LinPred # required for concordance
+survival::concordance(Y_test ~ LP)$concordance
+
+# and the time-dependent AUC by:
+if (!requireNamespace("survivalROC", quietly = TRUE)) install.packages("survivalROC")
+library(survivalROC)
+survivalROC::survivalROC.C(Stime = Y_test[,1], status = Y_test[,2],
+                           marker = LinPred, predict.time = median(Y_test[,1]))$AUC
+
+```
 
   
 ## Summary

@@ -34,8 +34,9 @@ Each row corresponds to a sample.
 \item{Omics}{A matrix of omics data per leaf node. This matrix has
 dimensions: sample size × (number of leaf nodes × number of omics variables).
 For each observation, only the block of omics variables corresponding to its
-tree node is populated (other blocks are set to zero). If the matrix is high-dimensional,
-a sparse matrix is returned of class "dgCMatrix" for memory efficiency.}
+tree node is populated (other blocks are set to zero).
+If the matrix is high-dimensional, a sparse matrix is returned of class
+"dgCMatrix" for memory efficiency.}
 }
 }
 \description{

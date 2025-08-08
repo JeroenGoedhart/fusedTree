@@ -33,8 +33,9 @@
 #'   \item{Omics}{A matrix of omics data per leaf node. This matrix has
 #'     dimensions: sample size × (number of leaf nodes × number of omics variables).
 #'     For each observation, only the block of omics variables corresponding to its
-#'     tree node is populated (other blocks are set to zero). If the matrix is high-dimensional,
-#'     a sparse matrix is returned of class "dgCMatrix" for memory efficiency.}
+#'     tree node is populated (other blocks are set to zero).
+#'     If the matrix is high-dimensional, a sparse matrix is returned of class
+#'     "dgCMatrix" for memory efficiency.}
 #' }
 #'
 #' @export
@@ -95,7 +96,7 @@ Dat_Tree <- function(Tree, X, Z, LinVars = TRUE) {
     nodes <- as.numeric(nodes)
     NodeInds <- base::sort(base::unique(as.numeric(row.names(Tree$frame)[Tree$where])))
   } else if (inherits(Tree, "constparty")) {
-    nodes <- partykit::predict.party(Tree, type = "node")
+    nodes <- partykit::predict.party(Tree, newdata = Z, type = "node")
     NodeInds <- base::sort(base::unique(nodes))
   }
 
@@ -933,13 +934,14 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
   # ---- Check inputs ----
   if (!inherits(object, "fusedTree")) stop("Object must be of class 'fusedTree'.")
+  if (is.null(newY) | is.null(newX) | is.null(newZ)) {stop("Either newY, newX, or newZ is unspecified")}
   if (!is.matrix(newX)) stop("newX must be a matrix.")
   if (!is.data.frame(newZ)) stop("newZ must be a data frame.")
   if (!(is.numeric(newY) || inherits(newY, "Surv"))) stop("newY must be numeric or a Surv object.")
   if (ncol(newX) == 0 || nrow(newX) == 0) stop("newX has zero columns or rows.")
   if (ncol(newZ) == 0 || nrow(newZ) == 0) stop("newZ has zero columns or rows.")
   if (length(newY) == 0) stop("newY is empty.")
-  if (is.null(newY) | is.null(newX) | is.null(newZ)) {stop("Either newY, newX, or newZ is unspecified")}
+
 
   # ---- Extract components from model object ----
   Tree     <- object$Tree
@@ -985,17 +987,15 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
     }
 
     t_test <- sort(unique(newY[, 1]))
+    #t_test <- seq(0, max(newY[,1]), length.out = 100)
 
     # Interpolate cumulative baseline hazard
-    get_H0_t <- function(t, train_times, Ht) {
-      idxs <- which(train_times <= t)
-      if (length(idxs) == 0) {
-        return(0)
-      }
-      return(Ht[max(idxs)])
-    }
+    ord <- order(Breslow$time)
+    time_sorted <- Breslow$time[ord]
+    Ht_sorted   <- Breslow$Ht[ord]
 
-    H0_test <- sapply(t_test, get_H0_t, train_times = Breslow$time, Ht = Breslow$Ht)
+    H0_fun <- stats::stepfun(time_sorted, c(0, Ht_sorted), right = TRUE)
+    H0_test <- H0_fun(t_test)
 
     # Compute survival probabilities
     risk <- exp(LP)
