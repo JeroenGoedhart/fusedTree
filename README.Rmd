@@ -99,6 +99,7 @@ rp     <- rpart(
 # poste-prune the tree
 cp     <- rp$cptable[which.min(rp$cptable[, "xerror"]), "CP"]
 Treefit <- prune(rp, cp = cp)
+
 rpart.plot(Treefit,
            type=5,
            extra=1, 
@@ -187,7 +188,14 @@ fit <- fusedTree(
 
 # View results
 fit$Effects     # Omics effects per leaf
-plot(fit$Tree)  # Underlying tree structure
+rpart.plot(fit$Tree,
+           type=5,
+           extra=1, 
+           box.palette="Pu",
+           branch.lty=8, 
+           shadow.col=0, 
+           nn=TRUE,
+           cex = 0.6) # Underlying tree structure
 fit$Pars        # Model parameters
 ```
 
@@ -241,6 +249,7 @@ rp <- rpart::rpart(Y ~ ., data = dat,
                    method = "class", model = TRUE)
 cp <- rp$cptable[,1][which.min(rp$cptable[,4])]
 Treefit <- rpart::prune(rp, cp = cp)
+
 rpart.plot(Treefit,
            type=5,
            extra=1, 
@@ -373,7 +382,7 @@ fit_surv <- fusedTree(Tree = Treefit, X = X, Y = Y_surv, Z = Z,
                       LinVars = TRUE, model = "cox",
                       lambda = optPenalties[1],
                       alpha = optPenalties[2],
-                      verbose = TRUE, maxIter = 100)
+                      verbose = FALSE, maxIter = 100)
 # effect size estimates
 fit_surv$Effects
 

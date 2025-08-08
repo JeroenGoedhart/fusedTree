@@ -93,6 +93,7 @@ rp     <- rpart(
 # poste-prune the tree
 cp     <- rp$cptable[which.min(rp$cptable[, "xerror"]), "CP"]
 Treefit <- prune(rp, cp = cp)
+
 rpart.plot(Treefit,
            type=5,
            extra=1, 
@@ -233,7 +234,14 @@ fit$Effects     # Omics effects per leaf
 #> -0.9519646 -0.9519646  3.1750430  3.1750430  3.1750430  1.7737451  1.7737451 
 #>      x4_N7      x5_N2      x5_N6      x5_N7 
 #>  1.7737451 -1.9979752 -1.9979752 -1.9979752
-plot(fit$Tree)  # Underlying tree structure
+rpart.plot(fit$Tree,
+           type=5,
+           extra=1, 
+           box.palette="Pu",
+           branch.lty=8, 
+           shadow.col=0, 
+           nn=TRUE,
+           cex = 0.6) # Underlying tree structure
 ```
 
 <img src="man/figures/README-fit-fusedTree-1.png" width="100%" />
@@ -301,6 +309,7 @@ rp <- rpart::rpart(Y ~ ., data = dat,
                    method = "class", model = TRUE)
 cp <- rp$cptable[,1][which.min(rp$cptable[,4])]
 Treefit <- rpart::prune(rp, cp = cp)
+
 rpart.plot(Treefit,
            type=5,
            extra=1, 
@@ -468,91 +477,8 @@ fit_surv <- fusedTree(Tree = Treefit, X = X, Y = Y_surv, Z = Z,
                       LinVars = TRUE, model = "cox",
                       lambda = optPenalties[1],
                       alpha = optPenalties[2],
-                      verbose = TRUE, maxIter = 100)
+                      verbose = FALSE, maxIter = 100)
 #> Fit fusedTree with fusion penalty
-#> Iteration  1   log likelihood equals:  -1152.909
-#> Iteration  2   log likelihood equals:  -1102.971
-#> Iteration  3   log likelihood equals:  -1081.002
-#> Iteration  4   log likelihood equals:  -1068.760
-#> Iteration  5   log likelihood equals:  -1061.176
-#> Iteration  6   log likelihood equals:  -1056.175
-#> Iteration  7   log likelihood equals:  -1052.739
-#> Iteration  8   log likelihood equals:  -1050.309
-#> Iteration  9   log likelihood equals:  -1048.552
-#> Iteration 10   log likelihood equals:  -1047.261
-#> Iteration 11   log likelihood equals:  -1046.300
-#> Iteration 12   log likelihood equals:  -1045.576
-#> Iteration 13   log likelihood equals:  -1045.026
-#> Iteration 14   log likelihood equals:  -1044.606
-#> Iteration 15   log likelihood equals:  -1044.282
-#> Iteration 16   log likelihood equals:  -1044.032
-#> Iteration 17   log likelihood equals:  -1043.837
-#> Iteration 18   log likelihood equals:  -1043.686
-#> Iteration 19   log likelihood equals:  -1043.567
-#> Iteration 20   log likelihood equals:  -1043.474
-#> Iteration 21   log likelihood equals:  -1043.400
-#> Iteration 22   log likelihood equals:  -1043.343
-#> Iteration 23   log likelihood equals:  -1043.297
-#> Iteration 24   log likelihood equals:  -1043.261
-#> Iteration 25   log likelihood equals:  -1043.232
-#> Iteration 26   log likelihood equals:  -1043.210
-#> Iteration 27   log likelihood equals:  -1043.192
-#> Iteration 28   log likelihood equals:  -1043.177
-#> Iteration 29   log likelihood equals:  -1043.166
-#> Iteration 30   log likelihood equals:  -1043.157
-#> Iteration 31   log likelihood equals:  -1043.149
-#> Iteration 32   log likelihood equals:  -1043.144
-#> Iteration 33   log likelihood equals:  -1043.139
-#> Iteration 34   log likelihood equals:  -1043.135
-#> Iteration 35   log likelihood equals:  -1043.132
-#> Iteration 36   log likelihood equals:  -1043.130
-#> Iteration 37   log likelihood equals:  -1043.128
-#> Iteration 38   log likelihood equals:  -1043.127
-#> Iteration 39   log likelihood equals:  -1043.125
-#> Iteration 40   log likelihood equals:  -1043.125
-#> Iteration 41   log likelihood equals:  -1043.124
-#> Iteration 42   log likelihood equals:  -1043.123
-#> Iteration 43   log likelihood equals:  -1043.123
-#> Iteration 44   log likelihood equals:  -1043.122
-#> Iteration 45   log likelihood equals:  -1043.122
-#> Iteration 46   log likelihood equals:  -1043.122
-#> Iteration 47   log likelihood equals:  -1043.121
-#> Iteration 48   log likelihood equals:  -1043.121
-#> Iteration 49   log likelihood equals:  -1043.121
-#> Iteration 50   log likelihood equals:  -1043.121
-#> Iteration 51   log likelihood equals:  -1043.121
-#> Iteration 52   log likelihood equals:  -1043.121
-#> Iteration 53   log likelihood equals:  -1043.121
-#> Iteration 54   log likelihood equals:  -1043.121
-#> Iteration 55   log likelihood equals:  -1043.121
-#> Iteration 56   log likelihood equals:  -1043.121
-#> Iteration 57   log likelihood equals:  -1043.121
-#> Iteration 58   log likelihood equals:  -1043.121
-#> Iteration 59   log likelihood equals:  -1043.121
-#> Iteration 60   log likelihood equals:  -1043.121
-#> Iteration 61   log likelihood equals:  -1043.121
-#> Iteration 62   log likelihood equals:  -1043.121
-#> Iteration 63   log likelihood equals:  -1043.121
-#> Iteration 64   log likelihood equals:  -1043.121
-#> Iteration 65   log likelihood equals:  -1043.121
-#> Iteration 66   log likelihood equals:  -1043.121
-#> Iteration 67   log likelihood equals:  -1043.121
-#> Iteration 68   log likelihood equals:  -1043.121
-#> Iteration 69   log likelihood equals:  -1043.121
-#> Iteration 70   log likelihood equals:  -1043.121
-#> Iteration 71   log likelihood equals:  -1043.121
-#> Iteration 72   log likelihood equals:  -1043.121
-#> Iteration 73   log likelihood equals:  -1043.121
-#> Iteration 74   log likelihood equals:  -1043.121
-#> Iteration 75   log likelihood equals:  -1043.121
-#> Iteration 76   log likelihood equals:  -1043.121
-#> Iteration 77   log likelihood equals:  -1043.121
-#> Iteration 78   log likelihood equals:  -1043.121
-#> Iteration 79   log likelihood equals:  -1043.121
-#> Iteration 80   log likelihood equals:  -1043.121
-#> Iteration 81   log likelihood equals:  -1043.121
-#> Iteration 82   log likelihood equals:  -1043.121
-#> IRLS converged at iteration  82
 # effect size estimates
 fit_surv$Effects
 #>          N3          N4          N5          V1          V2          V3 
