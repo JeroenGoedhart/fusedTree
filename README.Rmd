@@ -55,7 +55,8 @@ We illustrate the model for a continuous response. The simulated data has a nonl
 ```{r load-packages}
 library(fusedTree)
 if (!requireNamespace("rpart", quietly = TRUE)) install.packages("rpart")
-library(rpart)
+if (!requireNamespace("rpart.plot", quietly = TRUE)) install.packages("rpart.plot")
+library(rpart); library(rpart.plot)
 ```
 
 ### 1. Simulate Data
@@ -65,7 +66,6 @@ set.seed(10)
 p       <- 5       # Number of omics variables
 p_Clin  <- 5       # Number of clinical variables
 N       <- 100     # Sample size
-
 # Nonlinear function of clinical variables
 g <- function(z) {
   15 * sin(pi * z[,1] * z[,2]) +
@@ -99,9 +99,14 @@ rp     <- rpart(
 # poste-prune the tree
 cp     <- rp$cptable[which.min(rp$cptable[, "xerror"]), "CP"]
 Treefit <- prune(rp, cp = cp)
-
-plot(Treefit, main = "Clinical-variable Tree")
-text(Treefit, use.n = TRUE)
+rpart.plot(Treefit,
+           type=5,
+           extra=1, 
+           box.palette="Pu",
+           branch.lty=8, 
+           shadow.col=0, 
+           nn=TRUE,
+           cex = 0.6)
 
 ## the software also accepts tree fits from the `partykit` package:
 if (!requireNamespace("partykit", quietly = TRUE)) install.packages("partykit")
@@ -236,7 +241,14 @@ rp <- rpart::rpart(Y ~ ., data = dat,
                    method = "class", model = TRUE)
 cp <- rp$cptable[,1][which.min(rp$cptable[,4])]
 Treefit <- rpart::prune(rp, cp = cp)
-plot(Treefit)
+rpart.plot(Treefit,
+           type=5,
+           extra=1, 
+           box.palette="Pu",
+           branch.lty=8, 
+           shadow.col=0, 
+           nn=TRUE,
+           cex = 0.6)
 ```
 
 We then tune the penalties and fit the fusedTree model:

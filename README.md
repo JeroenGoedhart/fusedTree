@@ -48,7 +48,8 @@ relationship with omics variables.
 ``` r
 library(fusedTree)
 if (!requireNamespace("rpart", quietly = TRUE)) install.packages("rpart")
-library(rpart)
+if (!requireNamespace("rpart.plot", quietly = TRUE)) install.packages("rpart.plot")
+library(rpart); library(rpart.plot)
 ```
 
 ### 1. Simulate Data
@@ -58,7 +59,6 @@ set.seed(10)
 p       <- 5       # Number of omics variables
 p_Clin  <- 5       # Number of clinical variables
 N       <- 100     # Sample size
-
 # Nonlinear function of clinical variables
 g <- function(z) {
   15 * sin(pi * z[,1] * z[,2]) +
@@ -93,9 +93,14 @@ rp     <- rpart(
 # poste-prune the tree
 cp     <- rp$cptable[which.min(rp$cptable[, "xerror"]), "CP"]
 Treefit <- prune(rp, cp = cp)
-
-plot(Treefit, main = "Clinical-variable Tree")
-text(Treefit, use.n = TRUE)
+rpart.plot(Treefit,
+           type=5,
+           extra=1, 
+           box.palette="Pu",
+           branch.lty=8, 
+           shadow.col=0, 
+           nn=TRUE,
+           cex = 0.6)
 ```
 
 <img src="man/figures/README-fit-tree-1.png" width="100%" />
@@ -296,7 +301,14 @@ rp <- rpart::rpart(Y ~ ., data = dat,
                    method = "class", model = TRUE)
 cp <- rp$cptable[,1][which.min(rp$cptable[,4])]
 Treefit <- rpart::prune(rp, cp = cp)
-plot(Treefit)
+rpart.plot(Treefit,
+           type=5,
+           extra=1, 
+           box.palette="Pu",
+           branch.lty=8, 
+           shadow.col=0, 
+           nn=TRUE,
+           cex = 0.6)
 ```
 
 <img src="man/figures/README-binary-example-1.png" width="100%" />
