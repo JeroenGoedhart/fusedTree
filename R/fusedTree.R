@@ -119,9 +119,9 @@ Dat_Tree <- function(Tree, X, Z, LinVars = TRUE) {
     return(list(Clinical = stats::model.matrix(~., Z), Omics = X))
   } else {
 
-    ClinIntercepts = stats::model.matrix(~ 0 + factor(nodes, levels = NodeInds))
+    ClinIntercepts <- stats::model.matrix(~ 0 + factor(nodes, levels = NodeInds))
 
-    X_tot <- Matrix::t(Matrix::KhatriRao(t(X), t(ClinIntercepts)))
+    X_tot <- Matrix::t(Matrix::KhatriRao(base::t(X), base::t(ClinIntercepts)))
     colnames(X_tot) <- c(sapply(namesX, function (x) base::paste0(x,base::paste0("_" ,Nodenames))))
     colnames(ClinIntercepts) <- Nodenames
     if (ncol(X) < nrow(X)) {
@@ -615,7 +615,7 @@ PenOpt <- function(Tree, X, Y, Z, model = NULL,
 #' @param alpha Numeric. Value for the fusion penalty.
 #' The fusion penalty is not incorporated when `alpha = 0` is specified.
 #' @param symFusion Logical. Whether fusion should be symmetric across nodes.
-#' Setting this parameter to \code{FALSE} induces assymetric fusion. That is,
+#' Setting this parameter to \code{FALSE} induces asymmetric fusion. That is,
 #' nodes having more similar predictions (using only clinical variables)
 #' of the response will be shrunk more to each other than nodes having more
 #' distinct predictions. Setting to \code{FALSE} is not tested very well so
@@ -637,7 +637,7 @@ PenOpt <- function(Tree, X, Y, Z, model = NULL,
 #'   \item{Effects}{A named numeric vector of estimated effect sizes, including:
 #'     intercepts (tree leaf nodes), omics effects (per node), and linear
 #'     clinical effects (if \code{LinVars = TRUE}).}
-#'   \item{Breslow}{(Optional) The breslow estimates of the baseline hazard \code{ht}
+#'   \item{Breslow}{(Optional) The Breslow estimates of the baseline hazard \code{ht}
 #'      and the cumulative baseline hazard \code{Ht} for each time point. Only returned for
 #'      \code{model = "cox"}.}
 #'   \item{Parameters}{A list of model parameters used in fitting (e.g.,
@@ -883,22 +883,26 @@ fusedTree <- function(Tree, X, Y, Z, LinVars = TRUE, model,
 #' @param object An object of class \code{"fusedTree"} returned by the \code{\link{fusedTree}} function.
 #' @param newX A matrix of new omics covariates for prediction. Must have the same number of columns (variables) as used in the model fitting.
 #' @param newZ A data frame of new clinical covariates for prediction.
-#' @param newY A numeric response vector or a \code{\link[survival]{Surv}} object. For linear regression,
-#' and logistic regression, newY is only used to store predictions and response values together. For cox regression,
-#' newY is used to interpolate the baseline hazard to the event times of the test data.
+#' @param newY Optional input that is only used for survival response.
+#' Defaults to \code{NULL}. If provided, it should be a
+#' \code{\link[survival]{Surv}} object. In that case, \code{newY} is used
+#' to interpolate the baseline hazard to the event times of the test data.
 #' @param ... Currently not used. Included for S3 method consistency.
 #'
 #' @return
 #' A model-specific prediction object:
 #' \itemize{
-#'   \item For \code{"linear"} models: a \code{data.frame} with columns \code{Resp} (observed responses) and \code{Ypred} (predicted values).
-#'   \item For \code{"logistic"} models: a \code{data.frame} with columns \code{Resp} (observed labels), \code{Ypred} (predicted probabilities), and \code{LinPred} (linear predictor).
+#'   \item For \code{"linear"} models: a \code{data.frame} with a single column \code{Ypred} (predicted values).
+#'   \item For \code{"logistic"} models: a \code{data.frame} with columns
+#'   \code{Probs} (predicted probabilities), and \code{LinPred} (linear predictor).
 #'   \item For \code{"cox"} models: a \code{list} with two elements:
 #'     \describe{
-#'       \item{data}{A \code{data.frame} with columns \code{Resp} (a \code{Surv} object) and \code{LinPred}.}
-#'       \item{Survival}{A matrix of predicted survival probabilities. Rows = test subjects, columns = unique times from \code{newY}.}
+#'       \item{data}{A \code{data.frame} with a single column \code{LinPred} (linear predictor).}
+#'       \item{Survival}{A matrix of predicted survival probabilities. Rows = test subjects, columns = unique times from \code{newY}.
+#'       Only returned when \code{newY} is provided.}
 #'     }
 #' }
+#'
 #' @export
 #'
 #' @seealso \code{\link{fusedTree}} for model fitting.
@@ -930,17 +934,17 @@ fusedTree <- function(Tree, X, Y, Z, LinVars = TRUE, model,
 #' Preds <- predict(fit, newX = X, newZ = Z, newY = Y)
 
 
-predict.fusedTree <- function(object, newX, newZ, newY, ...) {
+predict.fusedTree <- function(object, newX, newZ, newY = NULL, ...) {
 
   # ---- Check inputs ----
   if (!inherits(object, "fusedTree")) stop("Object must be of class 'fusedTree'.")
-  if (is.null(newY) | is.null(newX) | is.null(newZ)) {stop("Either newY, newX, or newZ is unspecified")}
+  if (is.null(newX) | is.null(newZ)) {stop("Either newY, newX, or newZ is unspecified")}
   if (!is.matrix(newX)) stop("newX must be a matrix.")
   if (!is.data.frame(newZ)) stop("newZ must be a data frame.")
-  if (!(is.numeric(newY) || inherits(newY, "Surv"))) stop("newY must be numeric or a Surv object.")
+  #if (!(is.numeric(newY) || inherits(newY, "Surv"))) stop("newY must be numeric or a Surv object.")
   if (ncol(newX) == 0 || nrow(newX) == 0) stop("newX has zero columns or rows.")
   if (ncol(newZ) == 0 || nrow(newZ) == 0) stop("newZ has zero columns or rows.")
-  if (length(newY) == 0) stop("newY is empty.")
+  #if (length(newY) == 0) stop("newY is empty.")
 
 
   # ---- Extract components from model object ----
@@ -968,47 +972,48 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
   # ---- Model-specific predictions ----
   if (model == "linear") {
-    if (length(unique(newY)) < 3) {
-      stop("Linear model, but newY has maximally 2 distinct values")
-    }
     Ypred <- LP
-    return(data.frame(Resp = newY, Ypred = Ypred))
+
+    return(data.frame(Ypred = Ypred))
 
   } else if (model == "logistic") {
     if (!all(newY == 1 | newY == 0)) {
       stop("Logistic model, specify newY as numeric coded with 0 and 1")
     }
     Ypred <- 1 / (1 + exp(-LP))
-    return(data.frame(Resp = newY, Ypred = Ypred, LinPred = LP))
+    return(data.frame(Probs = Ypred, LinPred = LP))
 
   } else if (model == "cox") {
-    if (!inherits(newY, "Surv")) {
-      stop("For Cox models, newY must be a Surv object.")
+
+    if (!is.null(newY)){
+      if (!inherits(newY, "Surv")) {
+        stop("For Cox models, newY must be a Surv object.")
+      }
+      t_test <- sort(unique(newY[, 1]))
+      #t_test <- seq(0, max(newY[,1]), length.out = 100)
+
+      # Interpolate cumulative baseline hazard
+      ord <- order(Breslow$time)
+      time_sorted <- Breslow$time[ord]
+      Ht_sorted   <- Breslow$Ht[ord]
+
+      H0_fun <- stats::stepfun(time_sorted, c(0, Ht_sorted), right = TRUE)
+      H0_test <- H0_fun(t_test)
+
+      # Compute survival probabilities
+      risk <- exp(LP)
+      S_test <- outer(risk, H0_test, function(r, H) exp(-r * H))
+
+      colnames(S_test) <- paste0("t=", sprintf("%.3f", t_test))
+
+      rownames(S_test) <- paste0("Subject_", seq_len(nrow(S_test)))
+      return(list(
+        LinPred = data.frame(LinPred = LP),
+        Survival = S_test
+      ))
+    } else {
+      return(data.frame(LinPred = LP))
     }
-
-    t_test <- sort(unique(newY[, 1]))
-    #t_test <- seq(0, max(newY[,1]), length.out = 100)
-
-    # Interpolate cumulative baseline hazard
-    ord <- order(Breslow$time)
-    time_sorted <- Breslow$time[ord]
-    Ht_sorted   <- Breslow$Ht[ord]
-
-    H0_fun <- stats::stepfun(time_sorted, c(0, Ht_sorted), right = TRUE)
-    H0_test <- H0_fun(t_test)
-
-    # Compute survival probabilities
-    risk <- exp(LP)
-    S_test <- outer(risk, H0_test, function(r, H) exp(-r * H))
-
-    colnames(S_test) <- paste0("t=", sprintf("%.3f", t_test))
-
-    rownames(S_test) <- paste0("Subject_", seq_len(nrow(S_test)))
-
-    return(list(
-      LinPred = data.frame(Resp = newY, LinPred = LP),
-      Survival = S_test
-    ))
   } else {
     stop("Unsupported model type: ", model)
   }
@@ -1111,7 +1116,6 @@ predict.fusedTree <- function(object, newX, newZ, newY, ...) {
 
   base::diag(rank_diff) <- 0
   w_matrix <- 1 / (1 + rank_diff)
-  print(w_matrix)
 
   # Normalize
   w_matrix <- w_matrix/base::rowSums(w_matrix)

@@ -270,8 +270,8 @@ X_test <- matrix(rnorm(N_test * p), nrow = N_test)
 Y_test <- as.vector(g(Z_test) + X_test %*% betas + rnorm(N_test))
 
 # Generate predictions
-Preds <- predict(fit, newX = X_test, newY = Y_test, newZ = Z_test)
-PMSE  <- mean((Preds$Resp - Preds$Ypred)^2)
+Preds <- predict(fit, newX = X_test, newZ = Z_test)
+PMSE  <- mean((Y_test - Preds$Ypred)^2)
 PMSE
 #> [1] 15.03962
 ```
@@ -381,7 +381,7 @@ prob_test <- 1 / (1 + exp(-eta_test))
 Y_test <- rbinom(N_test, size = 1, prob = prob_test)
 
 # Predict
-Preds <- predict(fit_bin, newX = X_test, newY = Y_test, newZ = Z_test)
+Preds <- predict(fit_bin, newX = X_test, newZ = Z_test)
 
 # AUC
 if (!requireNamespace("pROC", quietly = TRUE)) install.packages("pROC")
@@ -392,7 +392,7 @@ library(pROC)
 #> The following objects are masked from 'package:stats':
 #> 
 #>     cov, smooth, var
-auc_result <- pROC::auc(Y_test, Preds$Ypred)
+auc_result <- pROC::auc(Y_test, Preds$Probs)
 #> Setting levels: control = 0, case = 1
 #> Setting direction: controls < cases
 auc_result
@@ -469,7 +469,7 @@ optPenalties
 Note that we now included **continuous** variables linearly in the model
 (see clinical design matrix). We only do so for continuous variables and
 not for ordinal/categorical variables. The reason is that trees can have
-a hard time finding linear effects.
+difficulty in finding linear effects.
 
 ``` r
 # Fit fusedTree
@@ -520,7 +520,9 @@ time_test <- pmin(time_test, censor_test)
 Y_test <- Surv(time_test, status_test)
 
 # Predict
-Preds <- predict(fit_surv, newX = X_test, newY = Y_test, newZ = Z_test)
+# We provide Y_test as well to compute the survival probabilities for the
+# time-points of the test response.
+Preds <- predict(fit_surv, newX = X_test, newY = Y_test,  newZ = Z_test)
 
 # The prediction now contain the linear predictor
 LinPred <- Preds$LinPred$LinPred

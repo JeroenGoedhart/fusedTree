@@ -14,6 +14,9 @@ to omics effects in nodes having more distinct predictions.
 * For memory efficiency, Matrix algebra is now conduced using sparse matrices
 from the `Matrix` package when `X` is high-dimensional.
 
+* Predict function does not require the test response by default anymore. Rather,
+it is an optional parameter.
+
 # fusedTree 1.0.1
 
 ## New features

@@ -49,7 +49,7 @@ One of: \code{"linear"}, \code{"logistic"}, or \code{"cox"}.}
 The fusion penalty is not incorporated when \code{alpha = 0} is specified.}
 
 \item{symFusion}{Logical. Whether fusion should be symmetric across nodes.
-Setting this parameter to \code{FALSE} induces assymetric fusion. That is,
+Setting this parameter to \code{FALSE} induces asymmetric fusion. That is,
 nodes having more similar predictions (using only clinical variables)
 of the response will be shrunk more to each other than nodes having more
 distinct predictions. Setting to \code{FALSE} is not tested very well so
@@ -76,7 +76,7 @@ A list with the following components:
 \item{Effects}{A named numeric vector of estimated effect sizes, including:
 intercepts (tree leaf nodes), omics effects (per node), and linear
 clinical effects (if \code{LinVars = TRUE}).}
-\item{Breslow}{(Optional) The breslow estimates of the baseline hazard \code{ht}
+\item{Breslow}{(Optional) The Breslow estimates of the baseline hazard \code{ht}
 and the cumulative baseline hazard \code{Ht} for each time point. Only returned for
 \code{model = "cox"}.}
 \item{Parameters}{A list of model parameters used in fitting (e.g.,
